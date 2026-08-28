@@ -36,5 +36,5 @@ jobs:
 
       - name: Run Electron Builder
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.TOKEN_GIT }}
         run: npx electron-builder ${{ matrix.flag }} --publish always
