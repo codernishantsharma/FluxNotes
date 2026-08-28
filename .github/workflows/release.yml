@@ -3,10 +3,10 @@ name: Build and Release All Platforms
 on:
   push:
     tags:
-      - 'v*' # Triggers automatically when you push a tag like v0.1.0
+      - 'v*'
 
 permissions:
-  contents: write   # Allows GitHub Actions to create a release and upload assets
+  contents: write
 
 jobs:
   build:
@@ -17,10 +17,13 @@ jobs:
         include:
           - os: ubuntu-latest
             flag: --linux
+            artifact_name: linux
           - os: windows-latest
             flag: --win
+            artifact_name: windows
           - os: macos-latest
             flag: --mac
+            artifact_name: macos
 
     steps:
       - name: Check out code
@@ -37,7 +40,28 @@ jobs:
       - name: Build Next.js App
         run: npm run build:next
 
-      - name: Run Electron Builder
+      - name: Run Electron Builder (No Auto-Publish)
+        run: npx electron-builder ${{ matrix.flag }} --publish never
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.artifact_name }}
+          path: dist/
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all workflow artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: all-dist
+          merge-multiple: true
+
+      - name: Create GitHub Release and Upload Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: all-dist/*
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx electron-builder ${{ matrix.flag }} --publish always
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
