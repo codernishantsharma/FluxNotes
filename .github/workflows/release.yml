@@ -5,6 +5,9 @@ on:
     tags:
       - 'v*' # Triggers automatically when you push a tag like v0.1.0
 
+permissions:
+  contents: write   # Allows GitHub Actions to create a release and upload assets
+
 jobs:
   build:
     name: Build for ${{ matrix.os }}
@@ -36,5 +39,5 @@ jobs:
 
       - name: Run Electron Builder
         env:
-          GH_TOKEN: ${{ secrets.TOKEN_GIT }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx electron-builder ${{ matrix.flag }} --publish always
