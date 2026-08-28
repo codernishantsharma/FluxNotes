@@ -1,0 +1,83 @@
+{
+  "name": "fluxnotes",
+  "version": "0.1.0",
+  "private": true,
+  "main": "electron/main.js",
+  "build": {
+    "appId": "in.nishantapps.fluxnotes",
+    "productName": "FluxNotes",
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "icon": "app/favicon.ico",
+      "target": [
+        "nsis"
+      ]
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "npmnishantsharma",
+      "repo": "FluxNotes"
+    },
+    "mac": {
+      "icon": "app/favicon.icns",
+      "target": [
+        "dmg"
+      ]
+    },
+    "linux": {
+      "icon": "app/icon.png",
+      "target": [
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "rpm",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "tar.gz",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "dev": "concurrently -n \"NEXT,ELECTRON\" -c \"yellow,blue\" --kill-others \"next dev\" \"wait-on http://localhost:3000 && electron .\"",
+    "build": "next build && electron-builder",
+    "start": "next start",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "@keyv/sqlite": "^4.0.8",
+    "electron-serve": "^3.0.1",
+    "electron-updater": "^6.8.9",
+    "keyv": "^5.6.0",
+    "next": "16.3.3",
+    "puppeteer-core": "^25.9.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "concurrently": "^10.0.5",
+    "electron": "^44.0.0",
+    "electron-builder": "^26.15.3",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.3",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "wait-on": "^9.1.0"
+  }
+}
