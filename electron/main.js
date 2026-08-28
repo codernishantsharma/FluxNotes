@@ -1,10 +1,13 @@
 const { app, BrowserWindow, dialog, ipcMain, nativeImage, protocol, shell } = require("electron");
-const serve = require("electron-serve");
+const serve = require("electron-serve").default;
 const path = require("path");
 const fs = require("fs");
-const Keyv = require("keyv");
-const KeyvSqlite = require("@keyv/sqlite");
 const { autoUpdater } = require('electron-updater');
+
+// Check CLI flags for debug mode
+const args = process.argv.slice(2);
+const forceShowWorker = args.includes('--show-worker');
+const forceAllowDevTools = args.includes('--allow-dev-tools');
 
 // Configure autoUpdater settings
 autoUpdater.autoDownload = true;
@@ -21,6 +24,7 @@ let pendingChatUrl = null;
 let loginCheckInterval = null;
 
 function disableDevTools(window) {
+  if (forceAllowDevTools) return;
   window.webContents.on('before-input-event', (event, input) => {
     const isDevToolsShortcut = input.key === 'F12'
       || ((input.control || input.meta) && input.shift && input.key.toLowerCase() === 'i');
@@ -121,34 +125,64 @@ function completeNotePayload(payload) {
   };
 }
 
-// Setup Keyv with SQLite storage in user data folder
-const dbPath = path.join(app.getPath('userData'), 'notes.sqlite');
+// Setup Local JSON Storage in User Data Folder
+const dataFilePath = path.join(app.getPath('userData'), 'notes_data.json');
 const imagesDir = path.join(app.getPath('userData'), 'images');
 
 if (!fs.existsSync(imagesDir)) {
   fs.mkdirSync(imagesDir, { recursive: true });
 }
 
-// Initialize Keyv database
-const keyvSqlite = new KeyvSqlite.KeyvSqlite(`sqlite://${dbPath}`);
-const db = new Keyv.Keyv({ store: keyvSqlite});
+function readDataFile() {
+  try {
+    if (fs.existsSync(dataFilePath)) {
+      const rawData = fs.readFileSync(dataFilePath, 'utf-8');
+      const parsed = JSON.parse(rawData);
+      return {
+        notes_collection: Array.isArray(parsed.notes_collection) ? parsed.notes_collection : [],
+        image_records: Array.isArray(parsed.image_records) ? parsed.image_records : []
+      };
+    }
+  } catch (err) {
+    console.error('Failed to read local JSON data file:', err);
+  }
+  return { notes_collection: [], image_records: [] };
+}
 
-db.on('error', err => console.error('Keyv Database Connection Error:', err));
+function writeDataFile(data) {
+  try {
+    fs.writeFileSync(dataFilePath, JSON.stringify(data, null, 2), 'utf-8');
+  } catch (err) {
+    console.error('Failed to write local JSON data file:', err);
+  }
+}
 
 async function getStoredNotes() {
-  const notes = await db.get('notes_collection');
-  return notes || [];
+  const data = readDataFile();
+  return data.notes_collection;
 }
 
 async function getStoredRecords() {
-  const records = await db.get('image_records');
-  return records || [];
+  const data = readDataFile();
+  return data.image_records;
 }
 
 async function saveRecordToDb(record) {
-  const records = await getStoredRecords();
-  records.push(record);
-  await db.set('image_records', records);
+  const data = readDataFile();
+  data.image_records.push(record);
+  writeDataFile(data);
+}
+
+async function saveNotesCollection(notes) {
+  const data = readDataFile();
+  data.notes_collection = notes;
+  writeDataFile(data);
+}
+
+async function saveImageRecords(records) {
+  const data = readDataFile();
+  data.image_records = records;
+  writeDataFile(data);
 }
 
 function toLocalImageUrl(filePath) {
@@ -255,7 +289,7 @@ ipcMain.handle('save-note', async (_, noteData) => {
     notes.push(fullNoteRecord);
   }
 
-  await db.set('notes_collection', notes);
+  await saveNotesCollection(notes);
   return true;
 });
 
@@ -268,7 +302,7 @@ ipcMain.handle('rename-note', async (_, { topicId, topicName }) => {
   if (index === -1) return { success: false, error: 'Note not found.' };
 
   notes[index] = { ...notes[index], topicName: name };
-  await db.set('notes_collection', notes);
+  await saveNotesCollection(notes);
   return { success: true };
 });
 
@@ -278,7 +312,7 @@ ipcMain.handle('set-note-pinned', async (_, { topicId, pinned }) => {
   if (index === -1) return { success: false, error: 'Note not found.' };
 
   notes[index] = { ...notes[index], pinned: Boolean(pinned) };
-  await db.set('notes_collection', notes);
+  await saveNotesCollection(notes);
   return { success: true };
 });
 
@@ -302,11 +336,11 @@ ipcMain.handle('delete-note', async (_, topicId) => {
       if (error.code !== 'ENOENT') throw error;
     }
   }));
-  await db.set('notes_collection', remainingNotes);
+  await saveNotesCollection(remainingNotes);
 
   const removedPaths = new Set(removableImagePaths);
   const records = await getStoredRecords();
-  await db.set('image_records', records.filter((record) => !removedPaths.has(record.filePath)));
+  await saveImageRecords(records.filter((record) => !removedPaths.has(record.filePath)));
   return { success: true };
 });
 
@@ -350,7 +384,7 @@ ipcMain.handle('export-note', async (_, { images, topicName, format }) => {
   }
 
   if (format === 'png' || format === 'jpeg') {
-    const { canceled, filePaths } = await dialog.openDialog(mainWindow, {
+    const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
       title: `Export notes as ${format.toUpperCase()} images`,
       properties: ['openDirectory', 'createDirectory'],
     });
@@ -374,8 +408,10 @@ ipcMain.handle('export-note', async (_, { images, topicName, format }) => {
   return { success: false, error: 'Unsupported export format.' };
 });
 
-// Setup Login Verification and Window Toggling Routine
+// Setup Login Verification and Window Toggling Routine (Skipped if --show-worker flag is provided)
 function startLoginCheckRoutine() {
+  if (forceShowWorker) return; // Skip login checks entirely if debug flag is active
+
   if (loginCheckInterval) clearInterval(loginCheckInterval);
 
   loginCheckInterval = setInterval(async () => {
@@ -384,22 +420,18 @@ function startLoginCheckRoutine() {
     try {
       const currentUrl = hiddenWorkerWindow.webContents.getURL();
       
-      // If the hidden worker is currently on an auth/login redirect url (e.g., Auth0, Google Sign-in, login endpoints), pause checking
       if (!currentUrl.includes('chatgpt.com')) {
         return; 
       }
 
-      // Check if "Log in" or "Sign up" text elements exist on the chatgpt.com page content
       const hasLoginText = await hiddenWorkerWindow.webContents.executeJavaScript(`
         (function() {
           const bodyText = document.body ? document.body.innerText : "";
-          // Check for login buttons or text presence
           return bodyText.includes("Log in") || bodyText.includes("Sign up");
         })();
       `);
 
       if (hasLoginText) {
-        // User is not logged in: Hide main app window and show hidden worker window to let them sign in
         if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
           mainWindow.hide();
         }
@@ -407,7 +439,6 @@ function startLoginCheckRoutine() {
           hiddenWorkerWindow.show();
         }
       } else {
-        // User is logged in: Hide hidden worker window and show main app window
         if (hiddenWorkerWindow && !hiddenWorkerWindow.isDestroyed() && hiddenWorkerWindow.isVisible()) {
           hiddenWorkerWindow.hide();
         }
@@ -433,16 +464,18 @@ const createWindow = async () => {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
-      devTools: !app.isPackaged,
+      devTools: (!app.isPackaged || forceAllowDevTools),
     }
   });
-//open dev tools if not packaged
+
   hiddenWorkerWindow = new BrowserWindow({
+    width: forceShowWorker ? 800 : 0,
+    height: forceShowWorker ? 600 : 0,
     show: false, 
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
-      devTools: false,
+      devTools: (!app.isPackaged || forceAllowDevTools),
     },
     frame: false,
   });
@@ -460,25 +493,33 @@ const createWindow = async () => {
 
   await hiddenWorkerWindow.loadURL("https://chatgpt.com/");
 
-  // Start checking login state continuously
-   startLoginCheckRoutine();
+  // If debug flag is passed, force show both windows and open dev tools
+  if (forceShowWorker) {
+    mainWindow.show();
+    hiddenWorkerWindow.show();
+    if (forceAllowDevTools) {
+      mainWindow.webContents.openDevTools();
+      hiddenWorkerWindow.webContents.openDevTools();
+    }
+  } else {
+    startLoginCheckRoutine();
+  }
 
-  // Trigger check for updates once window is up and app is packaged
   if (app.isPackaged) {
     autoUpdater.checkForUpdatesAndNotify().catch(err => {
       console.log("Failed to check for updates:", err);
     });
   }
 
-  // Load existing records on startup
   const existingRecords = await getStoredNotes();
   existingRecords.forEach(rec => processedUrls.add(rec.id));
 
-  // Intercept DALL-E images
-  hiddenWorkerWindow.webContents.session.webRequest.onCompleted({ 
+ hiddenWorkerWindow.webContents.session.webRequest.onCompleted({ 
     urls: ['https://chatgpt.com/backend-api/estuary/content*'] 
   }, async (details) => {
     const imgUrl = details.url;
+    console.log("[ELECTRON] Image found! URL:", imgUrl);
+
     const urlObj = new URL(imgUrl);
     const fileId = urlObj.searchParams.get('id') || imgUrl;
     
@@ -500,8 +541,8 @@ const createWindow = async () => {
         const base64Data = base64.replace(/^data:image\/\w+;base64,/, "");
         const filePath = path.join(imagesDir, `note_${fileId}_${Date.now()}.png`);
         fs.writeFileSync(filePath, base64Data, 'base64');
+        console.log("[ELECTRON] Successfully downloaded and saved image locally to:", filePath);
         
-        // Save record into SQLite via Keyv
         await saveRecordToDb({ id: fileId, filePath, timestamp: Date.now() });
 
         if (mainWindow) {
@@ -514,7 +555,6 @@ const createWindow = async () => {
   });
 };
 
-// IPC Handler to load history from SQLite on startup
 ipcMain.handle('get-stored-images', async () => {
   const records = await getStoredRecords();
   return records
@@ -585,7 +625,7 @@ ipcMain.handle('fill-chatgpt-input', async (event, userText) => {
         });
 
         if (success) {
-          await new Promise(resolve => setTimeout(resolve, 150));
+          await new Promise(resolve => setTimeout(resolve, 200));
           const submitButton = document.getElementById('composer-submit-button');
           if (submitButton) submitButton.click();
         }
@@ -594,43 +634,48 @@ ipcMain.handle('fill-chatgpt-input', async (event, userText) => {
 
       async function waitForGenerationToFinish() {
         return new Promise(resolve => {
+          let stableCount = 0;
           const checkInterval = setInterval(() => {
-            const progressBar = document.querySelector('[data-testid="image-gen-loading-progress"]');
-            if (progressBar) {
-              const currentVal = progressBar.textContent || progressBar.getAttribute('aria-valuenow');
-              if (currentVal) {
-                console.log("PROG:" + currentVal.trim());
-              }
+            const submitBtn = document.getElementById('composer-submit-button');
+            const stopBtn = document.querySelector('[aria-label*="Stop" i], [aria-label*="Cancel" i]');
+            
+            // If a stop button is visible, generation is actively running
+            if (stopBtn) {
+              stableCount = 0;
+              return;
             }
 
-            const submitBtn = document.getElementById('composer-submit-button');
-            const voiceBtn = document.querySelector('[aria-label*="Start voice" i], [aria-label*="Start Voice" i]');
-            
-            let isDone = false;
             if (submitBtn) {
               const aria = (submitBtn.getAttribute('aria-label') || '').toLowerCase();
-              if (aria.includes('start voice') || aria.includes('send prompt')) isDone = true;
+              // Check if button has reverted to ready state
+              if (aria.includes('start voice') || aria.includes('send prompt') || !submitBtn.disabled) {
+                stableCount++;
+                // Require a few steady ticks to prevent false-positives between page splits
+                if (stableCount >= 3) {
+                  clearInterval(checkInterval);
+                  resolve();
+                }
+              } else {
+                stableCount = 0;
+              }
             }
-            if (voiceBtn) isDone = true;
-
-            if (isDone) {
-              clearInterval(checkInterval);
-              resolve();
-            }
-          }, 300); 
+          }, 500); 
         });
       }
 
       if (isNewChat && promptText.trim() !== "") {
         await insertAndSend(promptText);
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        await new Promise(resolve => setTimeout(resolve, 3000));
         await waitForGenerationToFinish();
-        await new Promise(resolve => setTimeout(resolve, 5000));
+        await new Promise(resolve => setTimeout(resolve, 3000));
       }
 
       await insertAndSend(userText);
       await new Promise(resolve => setTimeout(resolve, 2000)); 
       await waitForGenerationToFinish();
+      
+      // Extra safety delay to let last image stream finalize requests
+      await new Promise(resolve => setTimeout(resolve, 3000));
       
       const assistantMessages = document.querySelectorAll('div[data-message-author-role="assistant"]');
       const lastMessageNode = assistantMessages[assistantMessages.length - 1];

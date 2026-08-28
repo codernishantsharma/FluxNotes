@@ -9,6 +9,16 @@
     "directories": {
       "output": "dist"
     },
+    "npmRebuild": true,
+  "buildDependenciesFromSource": true,
+  "files": [
+    "electron/**/*",
+    "out/**/*",
+    "prompt.md"
+  ],
+  "asarUnpack": [
+      "node_modules/sqlite3/**"
+    ],
     "win": {
       "icon": "app/favicon.ico",
       "target": [
@@ -57,7 +67,12 @@
     "lint": "eslint",
     "build:next": "next build",
     "build:electron": "electron-builder",
-    "build:all": "npm run build:next && electron-builder -mwl"
+    "build:all": "npm run build:next && electron-builder -mwl",
+    "build:winux": "next build && electron-builder --win --linux"
+  },
+  "author": {
+    "name": "Nishant",
+    "email": "nishant@nishantapps.in"
   },
   "dependencies": {
     "@keyv/sqlite": "^4.0.8",
@@ -70,6 +85,7 @@
     "react-dom": "19.2.8"
   },
   "devDependencies": {
+    "@electron/rebuild": "^4.2.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

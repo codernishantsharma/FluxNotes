@@ -1,0 +1,40 @@
+name: Build and Release All Platforms
+
+on:
+  push:
+    tags:
+      - 'v*' # Triggers automatically when you push a tag like v0.1.0
+
+jobs:
+  build:
+    name: Build for ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            flag: --linux
+          - os: windows-latest
+            flag: --win
+          - os: macos-latest
+            flag: --mac
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Build Next.js App
+        run: npm run build:next
+
+      - name: Run Electron Builder
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder ${{ matrix.flag }} --publish always
