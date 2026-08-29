@@ -7,13 +7,13 @@ declare global {
       minimize: () => void;
       maximize: () => void;
       close: () => void;
-      startNewChat: () => Promise<boolean>;
-      setNoteChatUrl: (chatUrl: string) => Promise<boolean>;
+      startNewChat: () => Promise<{ sessionId: string }>;
+      setNoteChatSession: (chat: { chatUrl?: string; sessionId?: string; session?: { conversationId?: string | null; parentMessageId?: string | null } | null }) => Promise<boolean>;
       fillChatGptInput: (text: string) => Promise<any>;
       getStoredImages: () => Promise<string[]>;
       getAllNotes: () => Promise<any[]>;
       getNoteById: (topicId: string) => Promise<any>;
-      onNewImage: (callback: (filePath: string) => void) => void;
+      onNewImage: (callback: (image: string | { filePath: string; pageNumber?: number | null }) => void) => void;
       onProgressUpdate: (callback: (progress: any) => void) => void;
       saveNote: (note: any) => Promise<void>;
       renameNote: (topicId: string, topicName: string) => Promise<{ success: boolean; error?: string }>;
