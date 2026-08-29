@@ -1,7 +1,18 @@
+/* eslint-disable @next/next/no-img-element */
 'use client';
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+
+const isStartOrContinue = (text: string) => {
+  const lower = text.trim().toLowerCase();
+  return (
+    lower.includes('start') ||
+    lower.includes('continue') ||
+    lower.includes('proceed') ||
+    lower.includes('generate')
+  );
+};
 
 type SubTopic = {
   names: string[];
@@ -15,6 +26,9 @@ type AssistantData = {
   subTopics?: SubTopic[];
   aiResponse?: string;
   recommendedResponse?: string[];
+  chatUrl?: string;
+  chatSessionId?: string;
+  chatSession?: { conversationId?: string | null; parentMessageId?: string | null } | null;
 };
 
 type GeneratedPageImage = {
@@ -41,6 +55,7 @@ export default function NewChatPage() {
   const containerEndRef = useRef<HTMLDivElement | null>(null);
   const imageRefs = useRef<Record<number, HTMLImageElement | null>>({});
   const pageImagesRef = useRef<GeneratedPageImage[]>([]);
+  const chatSessionRef = useRef<{ sessionId?: string; session?: AssistantData['chatSession']; chatUrl?: string }>({});
 
   useEffect(() => {
     containerEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -48,14 +63,17 @@ export default function NewChatPage() {
 
   useEffect(() => {
     if (window.electronAPI?.onNewImage) {
-      window.electronAPI.onNewImage((filePath: string) => {
+      window.electronAPI.onNewImage((image) => {
+        const filePath = typeof image === 'string' ? image : image.filePath;
+        const pageNumber = typeof image === 'string' ? null : image.pageNumber;
+        if (!filePath) return;
         setPageImages((prev) => {
-          // Determine next logical page number based on what's already saved
-          const nextPgNum = prev.length + 1;
+          const nextPgNum = pageNumber || prev.length + 1;
           if (prev.some((item) => item.filePath === filePath)) return prev;
           
           setLoadingPagesCount((count) => Math.max(0, count - 1));
-          const updatedImages = [...prev, { pageNumber: nextPgNum, filePath }];
+          const updatedImages = [...prev.filter((item) => item.pageNumber !== nextPgNum), { pageNumber: nextPgNum, filePath }]
+            .sort((first, second) => first.pageNumber - second.pageNumber);
           pageImagesRef.current = updatedImages;
           return updatedImages;
         });
@@ -72,7 +90,9 @@ export default function NewChatPage() {
   useEffect(() => {
     const noteId = new URLSearchParams(window.location.search).get('id');
     if (!noteId) {
-      void window.electronAPI?.startNewChat?.();
+      void window.electronAPI?.startNewChat?.().then((chat) => {
+        chatSessionRef.current = { sessionId: chat?.sessionId };
+      });
       return;
     }
     if (!window.electronAPI?.getNoteById) return;
@@ -83,7 +103,16 @@ export default function NewChatPage() {
         const note = await window.electronAPI?.getNoteById(noteId);
         if (!isCurrent || !note) return;
 
-        void window.electronAPI?.setNoteChatUrl?.(note.chatUrl || '');
+        chatSessionRef.current = {
+          sessionId: note.chatSessionId,
+          session: note.chatSession,
+          chatUrl: note.chatUrl,
+        };
+        await window.electronAPI?.setNoteChatSession?.({
+          chatUrl: note.chatUrl,
+          sessionId: note.chatSessionId,
+          session: note.chatSession,
+        });
 
         const savedImages = Array.isArray(note.images)
           ? note.images
@@ -103,6 +132,9 @@ export default function NewChatPage() {
           topicId: note.topicId,
           topicName: note.topicName,
           subTopics: Array.isArray(note.subTopics) ? note.subTopics : [],
+          chatUrl: note.chatUrl,
+          chatSessionId: note.chatSessionId,
+          chatSession: note.chatSession,
         });
         setHasStartedGeneration(true);
       } catch (error) {
@@ -113,16 +145,6 @@ export default function NewChatPage() {
     void loadSavedNote();
     return () => { isCurrent = false; };
   }, []);
-
-  const isStartOrContinue = (text: string) => {
-    const lower = text.trim().toLowerCase();
-    return (
-      lower.includes('start') ||
-      lower.includes('continue') ||
-      lower.includes('proceed') ||
-      lower.includes('generate')
-    );
-  };
 
   const sendPrompt = useCallback(async (promptText: string) => {
     if (!promptText.trim() || isProcessing) return;
@@ -167,10 +189,16 @@ export default function NewChatPage() {
           }, null, 2);
 
           const responseData = await window.electronAPI?.fillChatGptInput(structuredPayload);
-
-          // Image-generation responses must not replace the approved outline or
-          // bring its question/recommendation UI back into view.
-          void responseData;
+          if (!responseData || responseData === false || responseData.error) {
+            throw new Error(`Could not generate page ${pageNumInt}.`);
+          }
+          if (responseData && typeof responseData === 'object') {
+            chatSessionRef.current = {
+              sessionId: responseData.chatSessionId || chatSessionRef.current.sessionId,
+              session: responseData.chatSession || chatSessionRef.current.session,
+              chatUrl: responseData.chatUrl || chatSessionRef.current.chatUrl,
+            };
+          }
         }
 
         setCurrentlyGeneratingPage(null);
@@ -181,7 +209,10 @@ export default function NewChatPage() {
             topicId: latestAssistantData.topicId || String(Date.now()),
             topicName: latestAssistantData.topicName || "Untitled Notes",
             subTopics: latestAssistantData.subTopics || [],
-            images: finalImagePaths
+            images: finalImagePaths,
+            chatUrl: chatSessionRef.current.chatUrl,
+            chatSessionId: chatSessionRef.current.sessionId,
+            chatSession: chatSessionRef.current.session,
           });
         }
 
@@ -189,6 +220,11 @@ export default function NewChatPage() {
         const responseData = await window.electronAPI?.fillChatGptInput(promptText);
         
         if (responseData && typeof responseData === 'object' && !responseData.error) {
+          chatSessionRef.current = {
+            sessionId: responseData.chatSessionId || chatSessionRef.current.sessionId,
+            session: responseData.chatSession || chatSessionRef.current.session,
+            chatUrl: responseData.chatUrl || chatSessionRef.current.chatUrl,
+          };
           setAssistantData((prevData) => {
             const updated = responseData.status === 'update' && prevData ? {
               ...prevData,
@@ -321,6 +357,7 @@ export default function NewChatPage() {
                       ref={(el) => { imageRefs.current[targetPageNum - 1] = el; }} 
                       src={existingImage.filePath} 
                       alt={`Generated Page ${targetPageNum}`} 
+                      loading="lazy"
                       className="w-full h-auto block m-0 p-0 rounded-md border border-white/5 shadow-lg"
                     />
                   );
@@ -335,7 +372,7 @@ export default function NewChatPage() {
                     </div>
                     <span className="text-xs text-slate-400 tracking-wider font-medium">
                       {isCurrentlyBuilding 
-                        ? `Generating page ${targetPageNum}... (${generationProgress || "0%"})` 
+                        ? `Generating page ${targetPageNum}...` 
                         : `Page ${targetPageNum} waiting in queue...`}
                     </span>
                   </div>
@@ -348,6 +385,7 @@ export default function NewChatPage() {
                   ref={(el) => { imageRefs.current[idx] = el; }} 
                   src={img.filePath} 
                   alt={`Generated Page ${img.pageNumber}`} 
+                  loading="lazy"
                   className="w-full h-auto block m-0 p-0 rounded-md border border-white/5 shadow-lg"
                 />
               ))
@@ -441,7 +479,7 @@ export default function NewChatPage() {
                 onChange={(e) => setInputText(e.target.value)}
                 onKeyDown={handleKeyDown}
                 disabled={isProcessing}
-                placeholder={isProcessing ? `Generating page ${currentlyGeneratingPage || 1} (${generationProgress || '0%'}) ...` : "Type your prompt to generate your notes"}
+                placeholder={isProcessing ? `Responding ...` : "Type your prompt to generate your notes"}
                 className="w-full relative rounded-full border border-teal-500/30 bg-[#111217]/80 backdrop-blur-xl px-6 py-4 text-sm text-white shadow-2xl transition placeholder-slate-400 focus:outline-none focus:border-cyan-400/50 disabled:opacity-90 disabled:cursor-not-allowed"
               />
               {exportMessage && (

@@ -1,6 +1,6 @@
 {
   "name": "fluxnotes",
-  "version": "0.1.0",
+  "version": "0.1.5",
   "private": true,
   "main": "electron/main.js",
   "build": {
@@ -10,19 +10,27 @@
       "output": "dist"
     },
     "npmRebuild": true,
-  "buildDependenciesFromSource": true,
-  "files": [
-    "electron/**/*",
-    "out/**/*",
-    "prompt.md"
-  ],
-  "asarUnpack": [
+    "buildDependenciesFromSource": true,
+    "files": [
+      "electron/**/*",
+      "out/**/*",
+      "prompt.md",
+      "icons/**/*"
+    ],
+    "asarUnpack": [
       "node_modules/sqlite3/**"
     ],
     "win": {
-      "icon": "app/favicon.ico",
+      "icon": "icons/favicon.ico",
       "target": [
-        "nsis"
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "arm64",
+            "ia32"
+          ]
+        }
       ]
     },
     "publish": {
@@ -31,30 +39,42 @@
       "repo": "FluxNotes"
     },
     "mac": {
-      "icon": "app/favicon.icns",
+      "icon": "icons/favicon.icns",
       "target": [
-        "dmg"
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
       ]
     },
     "linux": {
-      "icon": "app/icon.png",
+      "icon": "icons/favicon.png",
       "target": [
         {
           "target": "deb",
           "arch": [
-            "x64"
+            "x64",
+            "arm64",
+            "armv7l"
           ]
         },
         {
           "target": "rpm",
           "arch": [
-            "x64"
+            "x64",
+            "arm64",
+            "armv7l"
           ]
         },
         {
           "target": "tar.gz",
           "arch": [
-            "x64"
+            "x64",
+            "arm64",
+            "armv7l"
           ]
         }
       ]
@@ -62,6 +82,9 @@
   },
   "scripts": {
     "dev": "concurrently -n \"NEXT,ELECTRON\" -c \"yellow,blue\" --kill-others \"next dev\" \"wait-on http://localhost:3000 && electron .\"",
+    "dev:showWorker": "concurrently -n \"NEXT,ELECTRON\" -c \"yellow,blue\" --kill-others \"next dev\" \"wait-on http://localhost:3000 && electron . --show-worker\"",
+    "dev:allowDevTools": "concurrently -n \"NEXT,ELECTRON\" -c \"yellow,blue\" --kill-others \"next dev\" \"wait-on http://localhost:3000 && electron . --allow-dev-tools\"",
+    "dev:showWorker:allowDevTools": "concurrently -n \"NEXT,ELECTRON\" -c \"yellow,blue\" --kill-others \"next dev\" \"wait-on http://localhost:3000 && electron . --show-worker --allow-dev-tools\"",
     "build": "next build && electron-builder",
     "start": "next start",
     "lint": "eslint",

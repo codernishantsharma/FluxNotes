@@ -5,7 +5,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   maximize: () => ipcRenderer.send('window-maximize'),
   close: () => ipcRenderer.send('window-close'),
   startNewChat: () => ipcRenderer.invoke('start-new-chat'),
-  setNoteChatUrl: (chatUrl) => ipcRenderer.invoke('set-note-chat-url', chatUrl),
+  setNoteChatSession: (chat) => ipcRenderer.invoke('set-note-chat-session', chat),
   fillChatGptInput: (text) => ipcRenderer.invoke('fill-chatgpt-input', text),
   getStoredImages: () => ipcRenderer.invoke('get-stored-images'),
   getAllNotes: () => ipcRenderer.invoke('get-all-notes'),
