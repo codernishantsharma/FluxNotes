@@ -245,10 +245,10 @@ if (!fs.existsSync(imagesDir)) {
   fs.mkdirSync(imagesDir, { recursive: true });
 }
 
-function readDataFile() {
+async function readDataFileAsync() {
   try {
     if (fs.existsSync(dataFilePath)) {
-      const rawData = fs.readFileSync(dataFilePath, 'utf-8');
+      const rawData = await fs.promises.readFile(dataFilePath, 'utf-8');
       const parsed = JSON.parse(rawData);
       return {
         notes_collection: Array.isArray(parsed.notes_collection) ? parsed.notes_collection : [],
@@ -261,40 +261,40 @@ function readDataFile() {
   return { notes_collection: [], image_records: [] };
 }
 
-function writeDataFile(data) {
+async function writeDataFileAsync(data) {
   try {
-    fs.writeFileSync(dataFilePath, JSON.stringify(data, null, 2), 'utf-8');
+    await fs.promises.writeFile(dataFilePath, JSON.stringify(data, null, 2), 'utf-8');
   } catch (err) {
     console.error('Failed to write local JSON data file:', err);
   }
 }
 
 async function getStoredNotes() {
-  const data = readDataFile();
+  const data = await readDataFileAsync();
   return data.notes_collection;
 }
 
 async function getStoredRecords() {
-  const data = readDataFile();
+  const data = await readDataFileAsync();
   return data.image_records;
 }
 
 async function saveRecordToDb(record) {
-  const data = readDataFile();
+  const data = await readDataFileAsync();
   data.image_records.push(record);
-  writeDataFile(data);
+  await writeDataFileAsync(data);
 }
 
 async function saveNotesCollection(notes) {
-  const data = readDataFile();
+  const data = await readDataFileAsync();
   data.notes_collection = notes;
-  writeDataFile(data);
+  await writeDataFileAsync(data);
 }
 
 async function saveImageRecords(records) {
-  const data = readDataFile();
+  const data = await readDataFileAsync();
   data.image_records = records;
-  writeDataFile(data);
+  await writeDataFileAsync(data);
 }
 
 function toLocalImageUrl(filePath) {
@@ -624,7 +624,7 @@ function startLoginCheckRoutine() {
           mainWindow.focus();
         }
       }
-    } catch (err) {
+    } catch {
       // Ignore routine script evaluation errors during page transitions
     }
   }, 1000);

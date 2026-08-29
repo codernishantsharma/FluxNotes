@@ -1,7 +1,18 @@
+/* eslint-disable @next/next/no-img-element */
 'use client';
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+
+const isStartOrContinue = (text: string) => {
+  const lower = text.trim().toLowerCase();
+  return (
+    lower.includes('start') ||
+    lower.includes('continue') ||
+    lower.includes('proceed') ||
+    lower.includes('generate')
+  );
+};
 
 type SubTopic = {
   names: string[];
@@ -134,16 +145,6 @@ export default function NewChatPage() {
     void loadSavedNote();
     return () => { isCurrent = false; };
   }, []);
-
-  const isStartOrContinue = (text: string) => {
-    const lower = text.trim().toLowerCase();
-    return (
-      lower.includes('start') ||
-      lower.includes('continue') ||
-      lower.includes('proceed') ||
-      lower.includes('generate')
-    );
-  };
 
   const sendPrompt = useCallback(async (promptText: string) => {
     if (!promptText.trim() || isProcessing) return;
@@ -356,6 +357,7 @@ export default function NewChatPage() {
                       ref={(el) => { imageRefs.current[targetPageNum - 1] = el; }} 
                       src={existingImage.filePath} 
                       alt={`Generated Page ${targetPageNum}`} 
+                      loading="lazy"
                       className="w-full h-auto block m-0 p-0 rounded-md border border-white/5 shadow-lg"
                     />
                   );
@@ -383,6 +385,7 @@ export default function NewChatPage() {
                   ref={(el) => { imageRefs.current[idx] = el; }} 
                   src={img.filePath} 
                   alt={`Generated Page ${img.pageNumber}`} 
+                  loading="lazy"
                   className="w-full h-auto block m-0 p-0 rounded-md border border-white/5 shadow-lg"
                 />
               ))
