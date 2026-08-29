@@ -133,10 +133,10 @@ if (!fs.existsSync(imagesDir)) {
   fs.mkdirSync(imagesDir, { recursive: true });
 }
 
-function readDataFile() {
+async function readDataFileAsync() {
   try {
     if (fs.existsSync(dataFilePath)) {
-      const rawData = fs.readFileSync(dataFilePath, 'utf-8');
+      const rawData = await fs.promises.readFile(dataFilePath, 'utf-8');
       const parsed = JSON.parse(rawData);
       return {
         notes_collection: Array.isArray(parsed.notes_collection) ? parsed.notes_collection : [],
@@ -149,40 +149,40 @@ function readDataFile() {
   return { notes_collection: [], image_records: [] };
 }
 
-function writeDataFile(data) {
+async function writeDataFileAsync(data) {
   try {
-    fs.writeFileSync(dataFilePath, JSON.stringify(data, null, 2), 'utf-8');
+    await fs.promises.writeFile(dataFilePath, JSON.stringify(data, null, 2), 'utf-8');
   } catch (err) {
     console.error('Failed to write local JSON data file:', err);
   }
 }
 
 async function getStoredNotes() {
-  const data = readDataFile();
+  const data = await readDataFileAsync();
   return data.notes_collection;
 }
 
 async function getStoredRecords() {
-  const data = readDataFile();
+  const data = await readDataFileAsync();
   return data.image_records;
 }
 
 async function saveRecordToDb(record) {
-  const data = readDataFile();
+  const data = await readDataFileAsync();
   data.image_records.push(record);
-  writeDataFile(data);
+  await writeDataFileAsync(data);
 }
 
 async function saveNotesCollection(notes) {
-  const data = readDataFile();
+  const data = await readDataFileAsync();
   data.notes_collection = notes;
-  writeDataFile(data);
+  await writeDataFileAsync(data);
 }
 
 async function saveImageRecords(records) {
-  const data = readDataFile();
+  const data = await readDataFileAsync();
   data.image_records = records;
-  writeDataFile(data);
+  await writeDataFileAsync(data);
 }
 
 function toLocalImageUrl(filePath) {
@@ -447,7 +447,7 @@ function startLoginCheckRoutine() {
           mainWindow.focus();
         }
       }
-    } catch (err) {
+    } catch {
       // Ignore routine script evaluation errors during page transitions
     }
   }, 1000);
@@ -524,6 +524,11 @@ const createWindow = async () => {
     const fileId = urlObj.searchParams.get('id') || imgUrl;
     
     if (processedUrls.has(fileId)) return;
+
+    if (processedUrls.size >= 500) {
+      const firstItem = processedUrls.values().next().value;
+      if (firstItem) processedUrls.delete(firstItem);
+    }
     processedUrls.add(fileId);
 
     try {
@@ -700,7 +705,6 @@ ipcMain.handle('fill-chatgpt-input', async (event, userText) => {
 
   try {
     const rawText = await hiddenWorkerWindow.webContents.executeJavaScript(script);
-    hiddenWorkerWindow.webContents.removeListener('console-message', consoleListener);
     
     if (rawText) {
       console.log("[ELECTRON] Raw text received from ChatGPT:", rawText.substring(0, 150) + "...");
@@ -733,9 +737,10 @@ ipcMain.handle('fill-chatgpt-input', async (event, userText) => {
     }
     return null;
   } catch (err) {
-    hiddenWorkerWindow.webContents.removeListener('console-message', consoleListener);
     console.error("Failed to execute ChatGPT injection script:", err);
     return false;
+  } finally {
+    hiddenWorkerWindow.webContents.removeListener('console-message', consoleListener);
   }
 });
 

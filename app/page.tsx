@@ -1,7 +1,7 @@
 /* eslint-disable @next/next/no-img-element */
 'use client';
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 
 type SubTopic = {
@@ -33,14 +33,18 @@ export default function DashboardPage() {
 
   const router = useRouter();
 
+  const sortedNotes = useMemo(() => {
+    return [...notes].sort((first, second) => (
+      Number(Boolean(second.pinned)) - Number(Boolean(first.pinned)) || second.timestamp - first.timestamp
+    ));
+  }, [notes]);
+
   const loadNotes = useCallback(async () => {
     if (window.electronAPI?.getAllNotes) {
       try {
         const savedNotes = await window.electronAPI.getAllNotes();
         if (savedNotes) {
-          setNotes([...savedNotes].sort((first, second) => (
-            Number(Boolean(second.pinned)) - Number(Boolean(first.pinned)) || second.timestamp - first.timestamp
-          )));
+          setNotes(savedNotes);
         }
       } catch (err) {
         console.error("Failed to load notes library:", err);
@@ -193,7 +197,7 @@ export default function DashboardPage() {
             </div>
 
             {/* Previously Made Notes Cards */}
-            {notes.map((note) => (
+            {sortedNotes.map((note) => (
               <div 
                 key={note.topicId || note.timestamp}
                 onClick={() => openNote(note.topicId)}
@@ -205,6 +209,7 @@ export default function DashboardPage() {
                       src={toImageSource(note.images[0])}
                       alt=""
                       aria-hidden="true"
+                      loading="lazy"
                       className="pointer-events-none absolute inset-0 h-full w-full scale-[1.03] object-cover opacity-45 blur-[1px] transition duration-300 group-hover:opacity-55"
                     />
                     <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/15 via-[#111217]/30 to-[#111217]/60" />
