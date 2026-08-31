@@ -28,5 +28,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
   onUpdaterEvent: (callback) => {
     ipcRenderer.removeAllListeners('updater-event');
     ipcRenderer.on('updater-event', (_event, data) => callback(data));
-  }
+  },
+  saveRawResult: (data) => ipcRenderer.invoke('save-raw-result', data),
 });

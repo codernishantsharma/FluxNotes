@@ -14,6 +14,45 @@ const isStartOrContinue = (text: string) => {
   );
 };
 
+const COZY_GENERATION_STATUSES = [
+  'Warming up the image engine…',
+  'Sketching out your ideas gently…',
+  'Mixing a fresh coat of colors…',
+  'Crafting the layout on the canvas…',
+  'Lettering handwritten headings…',
+  'Laying down the base strokes…',
+  'Composing a cozy hierarchy…',
+  'Polishing the whitespace…',
+  'Tidying up the margins…',
+  'Tucking in the gradients…',
+  'Placing the final decorations…',
+  'Giving everything a last look…',
+  'Warming the visual palette…',
+  'Shaping the sections softly…',
+  'Adding quiet highlights…',
+  'Steaming the final image…',
+] as const;
+
+function formatElapsed(ms: number) {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  if (hours > 0) return `${hours}h ${pad(minutes)}m ${pad(seconds)}s`;
+  if (minutes > 0) return `${minutes}m ${pad(seconds)}s`;
+  return `${seconds}s`;
+}
+
+function pickStatusForElapsed(ms: number, progress: string | null, fallbackIndex: number) {
+  if (progress && progress.trim().length > 0) return progress;
+  const bucket = Math.min(
+    COZY_GENERATION_STATUSES.length - 1,
+    Math.floor(fallbackIndex % COZY_GENERATION_STATUSES.length),
+  );
+  return COZY_GENERATION_STATUSES[bucket] ?? COZY_GENERATION_STATUSES[0];
+};
+
 type SubTopic = {
   names: string[];
   pageNumber: string | number;
@@ -51,6 +90,9 @@ export default function NewChatPage() {
   const [exportFormat, setExportFormat] = useState<ExportFormat>('pdf');
   const [isExporting, setIsExporting] = useState(false);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
+  const [pageStartTimes, setPageStartTimes] = useState<Record<number, number>>({});
+  const [failedPages, setFailedPages] = useState<Record<number, string>>({});
+  const [nowMs, setTickNow] = useState<number>(() => Date.now());
   
   const containerEndRef = useRef<HTMLDivElement | null>(null);
   const imageRefs = useRef<Record<number, HTMLImageElement | null>>({});
@@ -72,6 +114,12 @@ export default function NewChatPage() {
           if (prev.some((item) => item.filePath === filePath)) return prev;
           
           setLoadingPagesCount((count) => Math.max(0, count - 1));
+          setFailedPages((prevFailed) => {
+            if (!prevFailed[nextPgNum]) return prevFailed;
+            const next = { ...prevFailed };
+            delete next[nextPgNum];
+            return next;
+          });
           const updatedImages = [...prev.filter((item) => item.pageNumber !== nextPgNum), { pageNumber: nextPgNum, filePath }]
             .sort((first, second) => first.pageNumber - second.pageNumber);
           pageImagesRef.current = updatedImages;
@@ -85,6 +133,11 @@ export default function NewChatPage() {
         setGenerationProgress(progressVal);
       });
     }
+  }, []);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => setTickNow(Date.now()), 500);
+    return () => window.clearInterval(intervalId);
   }, []);
 
   useEffect(() => {
@@ -166,6 +219,8 @@ export default function NewChatPage() {
         setPageImages([]);
         pageImagesRef.current = [];
         imageRefs.current = {};
+        setPageStartTimes({});
+        setFailedPages({});
         setAssistantData((prev) => prev ? {
           ...prev,
           aiResponse: undefined,
@@ -181,6 +236,13 @@ export default function NewChatPage() {
 
           setCurrentlyGeneratingPage(pageNumInt);
           setGenerationProgress("0%");
+          setPageStartTimes((prev) => ({ ...prev, [pageNumInt]: Date.now() }));
+          setFailedPages((prev) => {
+            if (!prev[pageNumInt]) return prev;
+            const next = { ...prev };
+            delete next[pageNumInt];
+            return next;
+          });
 
           const structuredPayload = JSON.stringify({
             status: currentStatus,
@@ -188,16 +250,23 @@ export default function NewChatPage() {
             pageNumber: pageNumString
           }, null, 2);
 
-          const responseData = await window.electronAPI?.fillChatGptInput(structuredPayload);
-          if (!responseData || responseData === false || responseData.error) {
-            throw new Error(`Could not generate page ${pageNumInt}.`);
-          }
-          if (responseData && typeof responseData === 'object') {
-            chatSessionRef.current = {
-              sessionId: responseData.chatSessionId || chatSessionRef.current.sessionId,
-              session: responseData.chatSession || chatSessionRef.current.session,
-              chatUrl: responseData.chatUrl || chatSessionRef.current.chatUrl,
-            };
+          try {
+            const responseData = await window.electronAPI?.fillChatGptInput(structuredPayload);
+            if (!responseData || responseData === false || (responseData as { error?: unknown })?.error) {
+              throw new Error(`Could not generate page ${pageNumInt}.`);
+            }
+            if (responseData && typeof responseData === 'object') {
+              chatSessionRef.current = {
+                sessionId: responseData.chatSessionId || chatSessionRef.current.sessionId,
+                session: responseData.chatSession || chatSessionRef.current.session,
+                chatUrl: responseData.chatUrl || chatSessionRef.current.chatUrl,
+              };
+            }
+          } catch (pageErr) {
+            const errMsg = pageErr instanceof Error ? pageErr.message : `Generation failed for page ${pageNumInt}.`;
+            console.error(errMsg, pageErr);
+            setFailedPages((prev) => ({ ...prev, [pageNumInt]: errMsg }));
+            setLoadingPagesCount((count) => Math.max(0, count - 1));
           }
         }
 
@@ -344,40 +413,243 @@ export default function NewChatPage() {
         <div className="relative flex flex-1 flex-col overflow-y-auto pb-52 sm:pb-64 custom-scrollbar">
           <div className="mx-auto flex h-max w-full max-w-4xl flex-col gap-4 p-4">
             {hasStartedGeneration && assistantData?.subTopics && assistantData.subTopics.length > 0 ? (
-              // Map through total expected pages based on subTopics outline
-              assistantData.subTopics.map((subTopic, idx) => {
-                const targetPageNum = Number(subTopic.pageNumber || idx + 1);
-                const existingImage = pageImages.find((p) => p.pageNumber === targetPageNum);
-                const isCurrentlyBuilding = currentlyGeneratingPage === targetPageNum;
+              <>
+                <style>{`
+                  @keyframes cozyGradientShift {
+                    0%   { background-position: 0% 50%; }
+                    40%  { background-position: 100% 50%; }
+                    80%  { background-position: 60% 100%; }
+                    100% { background-position: 0% 50%; }
+                  }
+                  @keyframes softBreathe {
+                    0%, 100% { transform: scale(1); opacity: 0.65; }
+                    50%      { transform: scale(1.04); opacity: 1; }
+                  }
+                  @keyframes sparkFloat {
+                    0%   { transform: translate(-50%, 0) scale(1); opacity: 0.9; }
+                    100% { transform: translate(-50%, -28px) scale(0.6); opacity: 0; }
+                  }
+                  @keyframes twinkle {
+                    0%, 100% { opacity: 0.15; transform: scale(1); }
+                    50%      { opacity: 0.9;  transform: scale(1.25); }
+                  }
+                  @keyframes failShake {
+                    0%, 100% { transform: translateX(0); }
+                    20% { transform: translateX(-4px); }
+                    40% { transform: translateX(4px); }
+                    60% { transform: translateX(-2px); }
+                    80% { transform: translateX(2px); }
+                  }
+                  .cozy-bg {
+                    background: linear-gradient(120deg, rgba(14,165,233,0.18), rgba(20,184,166,0.22), rgba(139,92,246,0.20), rgba(244,114,182,0.18));
+                    background-size: 300% 300%;
+                    animation: cozyGradientShift 9s ease-in-out infinite;
+                  }
+                  .cozy-breathe { animation: softBreathe 4.5s ease-in-out infinite; }
+                  .cozy-spark { animation: sparkFloat 2.8s ease-out infinite; }
+                  .cozy-twinkle { animation: twinkle 3s ease-in-out infinite; }
+                  .fail-shake { animation: failShake 0.8s ease-in-out; }
+                `}</style>
+                {assistantData.subTopics.map((subTopic, idx) => {
+                  const targetPageNum = Number(subTopic.pageNumber || idx + 1);
+                  const existingImage = pageImages.find((p) => p.pageNumber === targetPageNum);
+                  const isCurrentlyBuilding = currentlyGeneratingPage === targetPageNum;
+                  const startTs = pageStartTimes[targetPageNum];
+                  const elapsedMs = startTs ? nowMs - startTs : 0;
+                  const failedMsg = failedPages[targetPageNum];
+                  const statusBucket = Math.max(0, Math.floor((elapsedMs || 0) / 3500) + idx);
+                  const displayStatus = failedMsg
+                    ? 'Failed'
+                    : pickStatusForElapsed(elapsedMs, isCurrentlyBuilding ? generationProgress : null, statusBucket);
 
-                if (existingImage) {
+                  if (existingImage) {
+                    return (
+                      <img
+                        key={`page-${targetPageNum}`}
+                        ref={(el) => { imageRefs.current[targetPageNum - 1] = el; }} 
+                        src={existingImage.filePath} 
+                        alt={`Generated Page ${targetPageNum}`} 
+                        loading="lazy"
+                        className="w-full h-auto block m-0 p-0 rounded-md border border-white/5 shadow-lg"
+                      />
+                    );
+                  }
+
+                  if (failedMsg) {
+                    return (
+                      <div
+                        key={`skeleton-page-${targetPageNum}`}
+                        className={`fail-shake relative w-full h-[600px] overflow-hidden rounded-md border border-red-500/40 bg-red-500/10 flex flex-col items-center justify-center gap-4 shadow-inner`}
+                      >
+                        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(239,68,68,0.18),transparent_60%)]" />
+                        <div className="relative flex flex-col items-center gap-3 px-6 text-center">
+                          <div className="flex h-14 w-14 items-center justify-center rounded-full border-2 border-red-400/60 bg-red-500/20 text-red-200">
+                            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M12 9v4" />
+                              <path d="M12 17h.01" />
+                              <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                            </svg>
+                          </div>
+                          <div className="space-y-1">
+                            <div className="text-sm font-semibold text-red-100">
+                              Page {targetPageNum} failed to generate
+                            </div>
+                            <div className="max-w-md text-xs text-red-200/80">
+                              {failedMsg}
+                            </div>
+                            <div className="pt-1 text-[11px] text-red-200/70">
+                              Try regenerating this page again once the run finishes.
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  const statusForElapsed = displayStatus;
+
                   return (
-                    <img
-                      key={`page-${targetPageNum}`}
-                      ref={(el) => { imageRefs.current[targetPageNum - 1] = el; }} 
-                      src={existingImage.filePath} 
-                      alt={`Generated Page ${targetPageNum}`} 
-                      loading="lazy"
-                      className="w-full h-auto block m-0 p-0 rounded-md border border-white/5 shadow-lg"
-                    />
-                  );
-                }
+                    <div 
+                      key={`skeleton-page-${targetPageNum}`} 
+                      className="relative w-full h-[600px] overflow-hidden rounded-md border border-white/10 flex flex-col shadow-inner isolate"
+                    >
+                      {/* Animated cozy background */}
+                      <div className="cozy-bg absolute inset-0 opacity-90" aria-hidden />
+                      <div
+                        className="absolute inset-0 opacity-[0.35]"
+                        aria-hidden
+                        style={{
+                          backgroundImage:
+                            'radial-gradient(rgba(255,255,255,0.14) 1px, transparent 1px), radial-gradient(rgba(255,255,255,0.08) 1px, transparent 1px)',
+                          backgroundSize: '22px 22px, 48px 48px',
+                          backgroundPosition: '0 0, 11px 11px',
+                          mixBlendMode: 'overlay',
+                        }}
+                      />
+                      <div
+                        className="absolute -left-16 top-10 h-48 w-48 rounded-full bg-cyan-300/30 blur-3xl cozy-twinkle"
+                        style={{ animationDelay: `${(idx * 0.3) % 3}s` }}
+                        aria-hidden
+                      />
+                      <div
+                        className="absolute right-10 top-40 h-40 w-40 rounded-full bg-fuchsia-300/30 blur-3xl cozy-twinkle"
+                        style={{ animationDelay: `${(0.7 + idx * 0.45) % 3}s` }}
+                        aria-hidden
+                      />
+                      <div
+                        className="absolute bottom-24 left-1/2 h-36 w-56 -translate-x-1/2 rounded-full bg-teal-300/30 blur-3xl cozy-twinkle"
+                        style={{ animationDelay: `${(1.4 + idx * 0.6) % 3}s` }}
+                        aria-hidden
+                      />
 
-                return (
-                  <div 
-                    key={`skeleton-page-${targetPageNum}`} 
-                    className="w-full h-[600px] rounded-md bg-white/[0.03] animate-pulse border border-white/5 flex flex-col items-center justify-center gap-3 shadow-inner"
-                  >
-                    <div className="w-12 h-12 rounded-full border-2 border-teal-500/20 border-t-teal-400 animate-spin flex items-center justify-center text-xs text-teal-300 font-mono">
+                      {/* Content */}
+                      <div className="relative z-10 flex h-full flex-col items-center justify-between px-8 py-8 text-center">
+                        <div className="w-full flex items-start justify-between text-[11px] uppercase tracking-[0.22em] text-white/75">
+                          <span className="rounded-full bg-black/30 px-3 py-1.5 backdrop-blur-sm border border-white/10">
+                            Page {targetPageNum}
+                          </span>
+                          {isCurrentlyBuilding ? (
+                            <span className="rounded-full bg-teal-500/30 px-3 py-1.5 text-teal-50 border border-teal-300/30 backdrop-blur-sm">
+                              In progress
+                            </span>
+                          ) : (
+                            <span className="rounded-full bg-white/10 px-3 py-1.5 text-white/80 border border-white/10 backdrop-blur-sm">
+                              Queued
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex flex-col items-center gap-6">
+                          <div className="relative flex h-20 w-20 items-center justify-center">
+                            <div className="absolute inset-0 rounded-full bg-white/20 cozy-breathe blur-xl" aria-hidden />
+                            <div
+                              className={`relative flex h-20 w-20 items-center justify-center rounded-full border-2 ${
+                                isCurrentlyBuilding
+                                  ? 'border-teal-200/60 bg-white/20 backdrop-blur-md'
+                                  : 'border-white/30 bg-white/10 backdrop-blur-sm'
+                              }`}
+                            >
+                              {isCurrentlyBuilding ? (
+                                <>
+                                  <div className="absolute inset-0 rounded-full border-2 border-transparent border-t-teal-300 animate-spin" style={{ animationDuration: '1.1s' }} />
+                                  <div className="absolute inset-1.5 rounded-full border border-transparent border-b-cyan-200/70 animate-spin" style={{ animationDuration: '1.8s', animationDirection: 'reverse' }} />
+                                  <svg className="cozy-breathe" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M3 17l4.35-9.22a2 2 0 0 1 1.8-1.18h5.7a2 2 0 0 1 1.8 1.18L21 17" />
+                                    <path d="M7.5 12.5a3 3 0 0 1 6 0" />
+                                    <circle cx="8.5" cy="19" r="1" fill="white" />
+                                    <circle cx="15.5" cy="19" r="1" fill="white" />
+                                  </svg>
+                                  <span className="absolute -top-2 left-1/2 -translate-x-1/2 h-2 w-2 rounded-full bg-fuchsia-300 cozy-spark" style={{ animationDelay: `${(idx * 0.6) % 3}s` }} />
+                                  <span className="absolute -top-2 left-1/2 -translate-x-1/2 h-1.5 w-1.5 rounded-full bg-cyan-200 cozy-spark" style={{ animationDelay: `${(0.9 + idx * 0.7) % 3}s` }} />
+                                </>
+                              ) : (
+                                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" strokeOpacity="0.85" strokeWidth="1.8">
+                                  <path d="M12 4v6m0 0-2.5-2M12 10l2.5-2M6.5 12H4M20 12h-2.5M6.8 18.2l-1.8 1.8M19 20l-1.8-1.8M6.8 5.8 5 4M19 4l-1.8 1.8" />
+                                  <circle cx="12" cy="15" r="3.25" />
+                                </svg>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="space-y-2.5">
+                            <div className="text-base font-semibold text-white drop-shadow-sm">
+                              {isCurrentlyBuilding
+                                ? `Painting page ${targetPageNum}…`
+                                : `Page ${targetPageNum} is waiting its turn`}
+                            </div>
+                            <div
+                              className={`min-h-[22px] text-xs text-white/90 ${
+                                isCurrentlyBuilding ? '' : 'opacity-80'
+                              }`}
+                            >
+                              {isCurrentlyBuilding
+                                ? statusForElapsed
+                                : 'Sipping a warm cup until it’s ready to go.'}
+                            </div>
+                            {subTopic?.names?.[0] && (
+                              <div className="pt-1 text-[11px] text-white/70 line-clamp-1">
+                                Theme — <span className="text-white/90">{subTopic.names[0]}</span>
+                              </div>
+                            )}
+                          </div>
+
+                          {isCurrentlyBuilding && generationProgress && (
+                            <div className="w-80 max-w-full">
+                              <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/20 backdrop-blur-sm">
+                                <div
+                                  className="h-full rounded-full bg-gradient-to-r from-teal-300 via-cyan-200 to-fuchsia-300 transition-all duration-500"
+                                  style={{
+                                    width: /(\d+(?:\.\d+)?)%/.test(generationProgress)
+                                      ? `${Math.max(2, Math.min(100, Number((generationProgress.match(/(\d+(?:\.\d+)?)%/)?.[1]) ?? 25)))}%`
+                                      : '40%',
+                                    backgroundSize: '200% 100%',
+                                    animation: 'cozyGradientShift 4s ease-in-out infinite',
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="w-full flex items-end justify-between text-[11px] text-white/80">
+                          <div className="flex items-center gap-2 rounded-full bg-black/25 px-3 py-1.5 backdrop-blur-sm border border-white/10">
+                            <span className="inline-block h-1.5 w-1.5 rounded-full bg-white/70 cozy-twinkle" />
+                            <span className="tabular-nums font-mono tracking-wide">
+                              {startTs ? formatElapsed(elapsedMs) : '—'}
+                            </span>
+                            <span className="text-white/60">elapsed</span>
+                          </div>
+                          <div className="text-right text-white/70">
+                            {isCurrentlyBuilding
+                              ? 'Hang tight — it takes time to look this cozy.'
+                              : 'Your turn is coming up softly.'}
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                    <span className="text-xs text-slate-400 tracking-wider font-medium">
-                      {isCurrentlyBuilding 
-                        ? `Generating page ${targetPageNum}...` 
-                        : `Page ${targetPageNum} waiting in queue...`}
-                    </span>
-                  </div>
-                );
-              })
+                  );
+                })}
+              </>
             ) : hasStartedGeneration && pageImages.length > 0 ? (
               pageImages.map((img, idx) => (
                 <img

@@ -1,0 +1,55 @@
+[
+  {
+    "timestamp": "2026-08-31T16:07:25.168Z",
+    "sessionId": "69ee467d-43f2-4f30-8107-64b54ec3fb1e",
+    "messageId": "17905230-6686-4d5f-8297-8540442ba32a",
+    "generationMessageId": "cef0737d-89e5-4435-9553-03886c9be4a7",
+    "conversationId": "6a95a667-150c-83e8-a921-db9142b40d77",
+    "generationId": null,
+    "fileId": null,
+    "response": "```json\n{\n  \"status\": \"IMAGE_GENERATED\",\n  \"imagePath\": \"sandbox:/mnt/data/a_photo_scan_of_a_handwritten_notebook_page_with_m.png\",\n  \"fileId\": \"file_00000000838482118204802f5560e127\",\n  \"generationId\": \"545c50be-51d1-48dc-84ec-2ddf07276e9b\"\n}\n```",
+    "generatedImages": [
+      {
+        "imagePath": "sandbox:/mnt/data/a_photo_scan_of_a_handwritten_notebook_page_with_m.png",
+        "fileId": "file_00000000838482118204802f5560e127",
+        "generationId": "545c50be-51d1-48dc-84ec-2ddf07276e9b"
+      },
+      {
+        "imagePath": "sandbox:/mnt/data/a_photo",
+        "fileId": null,
+        "generationId": null
+      },
+      {
+        "imagePath": "sandbox:/mnt/data/a_photo_scan_of_a_handwritten_notebook_page_with_m.png",
+        "fileId": null,
+        "generationId": null
+      }
+    ],
+    "handshakeTurns": [
+      {
+        "phase": "generation",
+        "text": "",
+        "messageId": "cef0737d-89e5-4435-9553-03886c9be4a7",
+        "empty": true
+      },
+      {
+        "phase": "handshake",
+        "text": "```json\n{\n  \"status\": \"IMAGE_GENERATED\",\n  \"imagePath\": \"sandbox:/mnt/data/a_photo_scan_of_a_handwritten_notebook_page_with_m.png\",\n  \"fileId\": \"file_00000000838482118204802f5560e127\",\n  \"generationId\": \"545c50be-51d1-48dc-84ec-2ddf07276e9b\"\n}\n```",
+        "messageId": "17905230-6686-4d5f-8297-8540442ba32a",
+        "empty": false
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-08-31T16:17:19.239Z",
+    "sessionId": "79d03895-7b10-4e65-8659-149444b372ba",
+    "messageId": "e88ddf13-9714-45a7-84b8-f162f8fc44d7",
+    "generationMessageId": "e88ddf13-9714-45a7-84b8-f162f8fc44d7",
+    "conversationId": "6a95a901-d330-83e9-8699-1c00e98b66a2",
+    "generationId": null,
+    "fileId": null,
+    "response": "{\n  \"status\": \"new\",\n  \"topicName\": \"Basic Trigonometry Class 10 CBSE\",\n  \"topicId\": \"4839201756482931\",\n  \"subTopics\": [\n    {\n      \"names\": [\n        \"Introduction to Trigonometry and Right Angled Triangles\",\n        \"Trigonometric Ratios (sin, cos, tan, cosec, sec, cot)\"\n      ],\n      \"pageNumber\": \"1\"\n    },\n    {\n      \"names\": [\n        \"Trigonometric Ratios of Standard Angles\",\n        \"Trigonometric Identities and Their Applications\"\n      ],\n      \"pageNumber\": \"2\"\n    },\n    {\n      \"names\": [\n        \"Finding Unknown Sides and Angles Using Trigonometric Ratios\",\n        \"Applications of Trigonometry in Real Life Problems\"\n      ],\n      \"pageNumber\": \"3\"\n    }\n  ],\n  \"aiResponse\": \"Do you want to proceed with these topics and start creating the handwritten notes?\",\n  \"recommendedResponse\": [\n    \"Continue\",\n    \"Add more topics\",\n    \"Change my class or board\",\n    \"Modify the topics\"\n  ]\n}",
+    "generatedImages": [],
+    "handshakeTurns": null
+  }
+]

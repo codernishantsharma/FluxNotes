@@ -322,10 +322,49 @@
     return result;
   }
 
+  function _extractImageInfoFromText(text) {
+    var results = [];
+    if (!text) return results;
+    try {
+      var jsonBlocks = text.match(/```json\s*([\s\S]*?)```/g) || [];
+      var candidates = jsonBlocks.map(function (b) {
+        return b.replace(/^```json\s*/, "").replace(/\s*```$/, "");
+      });
+      candidates.push(text);
+      for (var i = 0; i < candidates.length; i++) {
+        try {
+          var obj = JSON.parse(candidates[i]);
+          if (obj && typeof obj === "object") {
+            var found = [];
+            if (obj.status === "IMAGE_GENERATED") found.push(obj);
+            if (Array.isArray(obj.images)) {
+              for (var k = 0; k < obj.images.length; k++) {
+                if (obj.images[k] && (obj.images[k].imagePath || obj.images[k].fileId)) found.push(obj.images[k]);
+              }
+            }
+            for (var j = 0; j < found.length; j++) {
+              var info = found[j];
+              results.push({
+                imagePath: info.imagePath || null,
+                fileId: info.fileId || null,
+                generationId: info.generationId || null,
+              });
+            }
+          }
+        } catch (e) {}
+      }
+    } catch (e) {}
+    return results;
+  }
+
   async function _parseSSEStream(response) {
     var reader = response.body.getReader();
     var decoder = new TextDecoder();
     var fullText = "";
+    var messageId = null;
+    var generationId = null;
+    var fileId = null;
+    var sandboxImagePaths = [];
     var buffer = "";
 
     try {
@@ -350,6 +389,10 @@
               _conversationId = parsed.conversation_id;
             }
 
+            if (!generationId && parsed.message && parsed.message.generation_id) {
+              generationId = parsed.message.generation_id;
+            }
+
             var parts =
               parsed &&
               parsed.message &&
@@ -369,7 +412,34 @@
 
               if (parsed.message.id) {
                 _parentMessageId = parsed.message.id;
+                messageId = parsed.message.id;
               }
+
+              if (!fileId && parsed.message.metadata && parsed.message.metadata.attachments) {
+                try {
+                  for (var ai = 0; ai < parsed.message.metadata.attachments.length; ai++) {
+                    var att = parsed.message.metadata.attachments[ai];
+                    if (att && att.id) {
+                      fileId = att.id;
+                      break;
+                    }
+                  }
+                } catch (e) {}
+              }
+
+              try {
+                for (var pi = 0; pi < parts.length; pi++) {
+                  var part = parts[pi];
+                  if (typeof part === "string") {
+                    var sbm = part.match(/sandbox:\/mnt\/data\/[^\s"'<>\\)]+/g);
+                    if (sbm) {
+                      for (var si = 0; si < sbm.length; si++) {
+                        if (sandboxImagePaths.indexOf(sbm[si]) === -1) sandboxImagePaths.push(sbm[si]);
+                      }
+                    }
+                  }
+                }
+              } catch (e) {}
             }
           } catch (e) {}
         }
@@ -379,7 +449,32 @@
         reader.releaseLock();
       } catch (e) {}
     }
-    return fullText;
+
+    var parsedImages = _extractImageInfoFromText(fullText);
+    var mergedImages = [];
+    var seen = {};
+    var addInfo = function (info) {
+      if (!info || (!info.imagePath && !info.fileId && !info.generationId)) return;
+      var key = (info.imagePath || "") + "|" + (info.fileId || "") + "|" + (info.generationId || "");
+      if (seen[key]) return;
+      seen[key] = true;
+      mergedImages.push(info);
+    };
+    for (var ii = 0; ii < parsedImages.length; ii++) addInfo(parsedImages[ii]);
+    for (var si2 = 0; si2 < sandboxImagePaths.length; si2++) {
+      addInfo({ imagePath: sandboxImagePaths[si2], fileId: fileId, generationId: generationId });
+    }
+    if (mergedImages.length === 0 && (fileId || generationId)) {
+      addInfo({ fileId: fileId, generationId: generationId });
+    }
+
+    return {
+      text: fullText,
+      messageId: messageId,
+      generationId: generationId,
+      fileId: fileId,
+      generatedImages: mergedImages,
+    };
   }
 
   async function uploadFileToChatGPT(fileBase64, filename, mimeType) {
@@ -646,14 +741,35 @@
         clearTimeout(retryTimeoutId);
         throw new Error("WebSocket mode not supported");
       }
-      var result;
+      var streamResult;
       try {
-        result = await _parseSSEStream(res);
+      streamResult = await _parseSSEStream(res);
+      if (window.parent && typeof window.parent.postMessage === 'function') {
+        window.parent.postMessage({
+          type: 'FLUXNOTES_SAVE_RAW_RESULT',
+          sessionId: sessionId || 'default',
+          rawContent: streamResult.text,
+          conversationId: _conversationId
+        }, '*');
+        await window.electrolApi.saveRawResult({
+          sessionId: sessionId || 'default',
+          rawContent: res,
+          conversationId: _conversationId
+        });
+      }
+
       } finally {
         clearTimeout(retryTimeoutId);
       }
       saveSession(sessionId);
-      return result;
+      return {
+        text: streamResult.text,
+        messageId: streamResult.messageId,
+        conversationId: _conversationId,
+        generationId: streamResult.generationId,
+        fileId: streamResult.fileId,
+        generatedImages: streamResult.generatedImages,
+      };
     }
 
     if (!res.ok) {
@@ -672,14 +788,21 @@
       throw new Error("WebSocket mode not supported");
     }
 
-    var result;
+    var streamResult;
     try {
-      result = await _parseSSEStream(res);
+      streamResult = await _parseSSEStream(res);
     } finally {
       clearTimeout(timeoutId);
     }
     saveSession(sessionId);
-    return result;
+    return {
+      text: streamResult.text,
+      messageId: streamResult.messageId,
+      conversationId: _conversationId,
+      generationId: streamResult.generationId,
+      fileId: streamResult.fileId,
+      generatedImages: streamResult.generatedImages,
+    };
   }
   function getConversationId(sessionId) {
     if (!sessionId) sessionId = "default";
@@ -723,6 +846,152 @@
     );
   }
 
+  async function _fetchBlobToBase64(url, fetchOpts, fallbackFileName) {
+    var res = await fetch(url, fetchOpts);
+    if (!res.ok) {
+      var et = await res.text().catch(function () { return ""; });
+      throw new Error("Image download failed (" + res.status + "): " + et.substring(0, 300));
+    }
+    var blob = await res.blob();
+    var arrayBuffer = await blob.arrayBuffer();
+    var bytes = new Uint8Array(arrayBuffer);
+    var binary = "";
+    for (var j = 0; j < bytes.length; j++) binary += String.fromCharCode(bytes[j]);
+    var base64 = btoa(binary);
+    var mimeType = blob.type || null;
+    if (!mimeType && fallbackFileName) {
+      var m = fallbackFileName.match(/\.([a-zA-Z0-9]+)$/);
+      if (m) {
+        var ext = m[1].toLowerCase();
+        if (ext === "png") mimeType = "image/png";
+        else if (ext === "jpg" || ext === "jpeg") mimeType = "image/jpeg";
+        else if (ext === "webp") mimeType = "image/webp";
+        else if (ext === "gif") mimeType = "image/gif";
+      }
+    }
+    return {
+      base64: base64,
+      mimeType: mimeType || "image/png",
+      size: bytes.length,
+    };
+  }
+
+  async function downloadSandboxImage(imagePath, messageId, sessionId) {
+    if (sessionId) activateSession(sessionId);
+    var conversationId = _conversationId;
+    if (!conversationId) throw new Error("No active conversation");
+    if (!messageId) throw new Error("messageId is required");
+    if (!imagePath) throw new Error("imagePath is required");
+
+    var sandboxRel = imagePath;
+    if (sandboxRel.indexOf("sandbox:") === 0) {
+      sandboxRel = sandboxRel.substring("sandbox:".length);
+    }
+    if (sandboxRel.charAt(0) !== "/") sandboxRel = "/" + sandboxRel;
+
+    var token = await _getToken();
+    var deviceId = "";
+    try {
+      var cookies = document.cookie.split(";");
+      for (var i = 0; i < cookies.length; i++) {
+        var c = cookies[i].trim();
+        if (c.startsWith("oai-did=")) {
+          deviceId = c.substring(8);
+          break;
+        }
+      }
+    } catch (e) {}
+
+    var headers = {
+      Authorization: "Bearer " + token,
+      "OAI-Language": "en-US",
+    };
+    if (deviceId) headers["OAI-Device-Id"] = deviceId;
+
+    var fetchOpts = { credentials: "include", headers: headers };
+
+    var url =
+      "/backend-api/conversation/" +
+      encodeURIComponent(conversationId) +
+      "/interpreter/download?message_id=" +
+      encodeURIComponent(messageId) +
+      "&sandbox_path=" +
+      encodeURIComponent(sandboxRel);
+
+    console.log(
+      "[FluxNotes ChatGPT] Resolving sandbox image:",
+      sandboxRel,
+      "message_id:",
+      messageId,
+    );
+
+    var metaRes = await fetch(url, {
+      method: "GET",
+      credentials: fetchOpts.credentials,
+      headers: fetchOpts.headers,
+    });
+
+    if (!metaRes.ok) {
+      var errText = await metaRes.text().catch(function () {
+        return "";
+      });
+      throw new Error(
+        "Sandbox resolve failed (" + metaRes.status + "): " + errText.substring(0, 300),
+      );
+    }
+
+    var downloadUrl = null;
+    var info = { status: null, file_name: null, metadata: null };
+    var contentType = (metaRes.headers && metaRes.headers.get) ? String(metaRes.headers.get("content-type") || "") : "";
+    var rawMeta = await metaRes.text().catch(function () { return ""; });
+    try {
+      info = JSON.parse(rawMeta);
+      if (info && typeof info.download_url === "string" && info.download_url.length > 0) {
+        downloadUrl = info.download_url;
+      }
+    } catch (parseErr) {
+      console.warn("[FluxNotes ChatGPT] Sandbox response was not JSON (content-type=" + contentType + "). Assuming direct binary.");
+      downloadUrl = null;
+    }
+
+    var data;
+    if (downloadUrl) {
+      var absDownload = downloadUrl;
+      if (absDownload.indexOf("http://") !== 0 && absDownload.indexOf("https://") !== 0 && absDownload.charAt(0) !== "/") {
+        absDownload = "/" + absDownload;
+      }
+      console.log(
+        "[FluxNotes ChatGPT] Got download_url. Fetching:",
+        (absDownload.length > 120 ? absDownload.slice(0, 120) + "…" : absDownload),
+      );
+      data = await _fetchBlobToBase64(absDownload, fetchOpts, info ? info.file_name : null);
+    } else {
+      console.log("[FluxNotes ChatGPT] No download_url, interpreting response body as image bytes.");
+      var blobFromMeta = rawMeta.length ? (new Blob([rawMeta])) : null;
+      if (!blobFromMeta || blobFromMeta.size === 0) {
+        throw new Error("Sandbox response contained no download_url and no image bytes.");
+      }
+      var ab = await blobFromMeta.arrayBuffer();
+      var bs = new Uint8Array(ab);
+      var bin = "";
+      for (var k = 0; k < bs.length; k++) bin += String.fromCharCode(bs[k]);
+      var b64 = btoa(bin);
+      data = { base64: b64, mimeType: blobFromMeta.type || "image/png", size: bs.length };
+    }
+
+    console.log("[FluxNotes ChatGPT] Downloaded sandbox image. Size:", data.size, "type:", data.mimeType, "file:", info ? info.file_name : null);
+    return {
+      base64: data.base64,
+      mimeType: data.mimeType,
+      size: data.size,
+      imagePath: imagePath,
+      fileName: info ? info.file_name || null : null,
+      fileId: (info && info.metadata && info.metadata.file_id) ? info.metadata.file_id : ((info && info.file_id) ? info.file_id : null),
+      status: info ? info.status || null : null,
+      downloadUrl: downloadUrl,
+    };
+  }
+
   window.__fluxnotesChatGPT = {
     send: send,
     newConversation: newConversation,
@@ -730,6 +999,7 @@
     getConversationId: getConversationId,
     getSession: getSession,
     setSession: setSession,
+    downloadSandboxImage: downloadSandboxImage,
   };
   console.log("[FluxNotes ChatGPT] ChatGPT engine loaded");
   _getToken().catch(function () {});

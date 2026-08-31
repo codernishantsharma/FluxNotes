@@ -18,7 +18,8 @@ const appServe = app.isPackaged ? serve({
 }) : null;
 
 let mainWindow;
-let hiddenWorkerWindow;
+let sendWorkerWindow;
+let monitorWorkerWindow;
 let processedUrls = new Set();
 let pendingChatUrl = null;
 let activeChatSessionId = null;
@@ -27,6 +28,8 @@ let isCapturingImages = false;
 let activeGenerationPageNumber = null;
 let activeImageDownload = null;
 let isChatGptLoggedIn = false;
+let progressPollingInterval = null;
+let progressReloadTimeout = null;
 
 function createChatSessionId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
@@ -237,6 +240,122 @@ function getImageGenerationPayload(userText) {
   return null;
 }
 
+function stopProgressPolling() {
+  if (progressPollingInterval) {
+    clearInterval(progressPollingInterval);
+    progressPollingInterval = null;
+  }
+  if (progressReloadTimeout) {
+    clearTimeout(progressReloadTimeout);
+    progressReloadTimeout = null;
+  }
+}
+
+async function extractAndLogProgress() {
+  if (!monitorWorkerWindow || monitorWorkerWindow.isDestroyed()) return null;
+
+  try {
+    const progressTexts = await monitorWorkerWindow.webContents.executeJavaScript(`
+      (function() {
+        const results = [];
+        const airaElements = document.querySelectorAll('[aira-progress]');
+        airaElements.forEach((el) => {
+          const attrVal = el.getAttribute('aira-progress');
+          const text = el.innerText || el.textContent || '';
+          results.push({
+            attribute: attrVal,
+            text: text.trim()
+          });
+        });
+        const ariaElements = document.querySelectorAll('[aria-progress]');
+        ariaElements.forEach((el) => {
+          const attrVal = el.getAttribute('aria-progress');
+          const text = el.innerText || el.textContent || '';
+          results.push({
+            attribute: attrVal,
+            text: text.trim()
+          });
+        });
+        return results;
+      })();
+    `);
+
+    if (Array.isArray(progressTexts) && progressTexts.length > 0) {
+      const combinedProgress = progressTexts
+        .map((p) => (p.attribute ? `${p.attribute}${p.text ? ` - ${p.text}` : ''}` : p.text))
+        .filter(Boolean)
+        .join(' | ');
+
+      if (combinedProgress) {
+        console.log(`[PROGRESS] ${combinedProgress}`);
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('image-progress-update', combinedProgress);
+        }
+        return combinedProgress;
+      }
+    }
+
+    const fallbackText = await monitorWorkerWindow.webContents.executeJavaScript(`
+      (function() {
+        const allElements = document.querySelectorAll('*');
+        let found = [];
+        for (let i = 0; i < allElements.length; i++) {
+          const el = allElements[i];
+          const attrs = el.attributes;
+          for (let j = 0; j < attrs.length; j++) {
+            const attr = attrs[j];
+            if (attr.name.toLowerCase().includes('progress')) {
+              const text = (el.innerText || el.textContent || '').trim();
+              found.push(attr.name + '="' + attr.value + '"' + (text ? ': ' + text : ''));
+            }
+          }
+        }
+        return found.slice(0, 5).join(' || ');
+      })();
+    `);
+
+    if (fallbackText) {
+      console.log(`[PROGRESS] ${fallbackText}`);
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('image-progress-update', fallbackText);
+      }
+      return fallbackText;
+    }
+
+    return null;
+  } catch (err) {
+    console.error('[PROGRESS] Failed to extract progress:', err.message);
+    return null;
+  }
+}
+
+function startProgressPolling(intervalMs = 2000) {
+  stopProgressPolling();
+  void extractAndLogProgress();
+  progressPollingInterval = setInterval(() => {
+    void extractAndLogProgress();
+  }, intervalMs);
+}
+
+async function reloadAndTrackProgress() {
+  if (!monitorWorkerWindow || monitorWorkerWindow.isDestroyed()) return;
+
+  stopProgressPolling();
+
+  console.log('[PROGRESS] 10s elapsed. Reloading monitor window to track progress...');
+  const currentUrl = monitorWorkerWindow.webContents.getURL();
+
+  try {
+    await monitorWorkerWindow.loadURL(currentUrl);
+    console.log('[PROGRESS] Monitor window reloaded. Waiting 3s for page render...');
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    console.log('[PROGRESS] Starting progress polling (every 2s)...');
+    startProgressPolling(2000);
+  } catch (err) {
+    console.error('[PROGRESS] Failed to reload monitor window:', err.message);
+  }
+}
+
 // Setup Local JSON Storage in User Data Folder
 const dataFilePath = path.join(app.getPath('userData'), 'notes_data.json');
 const imagesDir = path.join(app.getPath('userData'), 'images');
@@ -319,8 +438,36 @@ function escapeHtml(value) {
   }[character]));
 }
 
+const RESULT_JSON_PATH = path.resolve(__dirname, '..', 'result.json');
+
+function appendToResultJson(entry) {
+  try {
+    let arr = [];
+    try {
+      if (fs.existsSync(RESULT_JSON_PATH)) {
+        const raw = fs.readFileSync(RESULT_JSON_PATH, 'utf8');
+        if (raw && raw.trim()) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) arr = parsed;
+        }
+      }
+    } catch (e) {
+      console.warn('[result.json] Failed to read existing file, starting fresh:', e.message);
+      arr = [];
+    }
+    arr.push({
+      timestamp: new Date().toISOString(),
+      ...entry,
+    });
+    fs.writeFileSync(RESULT_JSON_PATH, JSON.stringify(arr, null, 2), 'utf8');
+    console.log(`[result.json] Appended entry #${arr.length} -> ${RESULT_JSON_PATH}`);
+  } catch (writeErr) {
+    console.error('[result.json] Failed to write:', writeErr.message);
+  }
+}
+
 async function downloadGeneratedImage(imgUrl) {
-  if (!hiddenWorkerWindow || hiddenWorkerWindow.isDestroyed()) return null;
+  if (!sendWorkerWindow || sendWorkerWindow.isDestroyed()) return null;
 
   const urlObj = new URL(imgUrl);
   const fileId = urlObj.searchParams.get('id') || imgUrl;
@@ -332,7 +479,7 @@ async function downloadGeneratedImage(imgUrl) {
   processedUrls.add(fileId);
 
   try {
-    const base64 = await hiddenWorkerWindow.webContents.executeJavaScript(`
+    const base64 = await sendWorkerWindow.webContents.executeJavaScript(`
       fetch(${JSON.stringify(imgUrl)})
         .then((response) => {
           if (!response.ok) throw new Error('Image download failed: ' + response.status);
@@ -347,10 +494,14 @@ async function downloadGeneratedImage(imgUrl) {
     if (!base64) return null;
 
     const base64Data = base64.replace(/^data:image\/\w+;base64,/, "");
-    const filePath = path.join(imagesDir, `note_${fileId}_${Date.now()}.png`);
+    const mimeMatch = base64.match(/^data:image\/(\w+);base64,/);
+    const rawExt = mimeMatch ? mimeMatch[1].toLowerCase() : 'png';
+    const safeExt = rawExt === 'jpeg' ? 'jpg' : rawExt.replace(/[^a-zA-Z0-9]/g, '');
+    const safeFileId = safeFileName(String(fileId).slice(0, 100));
+    const filePath = path.join(imagesDir, `${safeFileId}.${safeExt}`);
     fs.writeFileSync(filePath, base64Data, 'base64');
-    console.log("[ELECTRON] Successfully downloaded and saved image locally to:", filePath);
-    await saveRecordToDb({ id: fileId, filePath, timestamp: Date.now() });
+    console.log("[ELECTRON] Successfully downloaded and saved image (by fileId):", filePath);
+    await saveRecordToDb({ id: fileId, fileId: fileId, filePath, timestamp: Date.now(), source: 'estuary' });
 
     if (mainWindow) {
       mainWindow.webContents.send('new-image', {
@@ -416,8 +567,11 @@ ipcMain.handle('start-new-chat', async () => {
   pendingChatUrl = null;
   activeChatSessionId = createChatSessionId();
   activeChatSession = { conversationId: null, parentMessageId: null };
-  if (hiddenWorkerWindow && !hiddenWorkerWindow.isDestroyed()) {
-    await hiddenWorkerWindow.loadURL('https://chatgpt.com/');
+  if (sendWorkerWindow && !sendWorkerWindow.isDestroyed()) {
+    await sendWorkerWindow.loadURL('https://chatgpt.com/');
+  }
+  if (monitorWorkerWindow && !monitorWorkerWindow.isDestroyed()) {
+    void monitorWorkerWindow.loadURL('https://chatgpt.com/');
   }
   return { sessionId: activeChatSessionId };
 });
@@ -439,7 +593,7 @@ ipcMain.handle('set-note-chat-session', (_, { chatUrl, sessionId, session }) => 
 
 ipcMain.handle('save-note', async (_, noteData) => {
   const notes = await getStoredNotes();
-  const chatUrl = noteData.chatUrl || (hiddenWorkerWindow ? hiddenWorkerWindow.webContents.getURL() : "");
+  const chatUrl = noteData.chatUrl || (sendWorkerWindow ? sendWorkerWindow.webContents.getURL() : "");
   const savedImages = Array.isArray(noteData.images)
     ? noteData.images
       .map((imagePath) => typeof imagePath === 'string' ? fromLocalImageUrl(imagePath) : '')
@@ -592,13 +746,13 @@ function startLoginCheckRoutine() {
   if (forceShowWorker) return;
   if (loginCheckInterval) clearInterval(loginCheckInterval);
   loginCheckInterval = setInterval(async () => {
-    if (!hiddenWorkerWindow || hiddenWorkerWindow.isDestroyed()) return;
+    if (!sendWorkerWindow || sendWorkerWindow.isDestroyed()) return;
     try {
-      const currentUrl = hiddenWorkerWindow.webContents.getURL();
+      const currentUrl = sendWorkerWindow.webContents.getURL();
       if (!currentUrl.includes('chatgpt.com')) {
         return;
       }
-      const hasLoginText = await hiddenWorkerWindow.webContents.executeJavaScript(`
+      const hasLoginText = await sendWorkerWindow.webContents.executeJavaScript(`
         (function() {
           const bodyText = document.body ? document.body.innerText : "";
           return bodyText.includes("Log in") || bodyText.includes("Sign up");
@@ -610,14 +764,17 @@ function startLoginCheckRoutine() {
           console.log("[ELECTRON] Hiding main window due to login page detection.");
           mainWindow.hide();
         }
-        if (hiddenWorkerWindow && !hiddenWorkerWindow.isVisible()) {
-          console.log("[ELECTRON] Showing hidden worker window for login.");
-          hiddenWorkerWindow.show();
-          hiddenWorkerWindow.focus();
+        if (sendWorkerWindow && !sendWorkerWindow.isVisible()) {
+          console.log("[ELECTRON] Showing send worker window for login.");
+          sendWorkerWindow.show();
+          sendWorkerWindow.focus();
         }
       } else {
-        if (hiddenWorkerWindow && !hiddenWorkerWindow.isDestroyed() && hiddenWorkerWindow.isVisible()) {
-          hiddenWorkerWindow.hide();
+        if (sendWorkerWindow && !sendWorkerWindow.isDestroyed() && sendWorkerWindow.isVisible()) {
+          sendWorkerWindow.hide();
+        }
+        if (monitorWorkerWindow && !monitorWorkerWindow.isDestroyed() && monitorWorkerWindow.isVisible()) {
+          monitorWorkerWindow.hide();
         }
         if (mainWindow && !mainWindow.isVisible()) {
           mainWindow.show();
@@ -645,7 +802,18 @@ const createWindow = async () => {
     }
   });
 
-  hiddenWorkerWindow = new BrowserWindow({
+  sendWorkerWindow = new BrowserWindow({
+    width: 800,
+    height: 600,
+    show: false,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      devTools: (!app.isPackaged || forceAllowDevTools),
+    },
+  });
+
+  monitorWorkerWindow = new BrowserWindow({
     width: 800,
     height: 600,
     show: false,
@@ -657,24 +825,105 @@ const createWindow = async () => {
   });
 
   disableDevTools(mainWindow);
-  disableDevTools(hiddenWorkerWindow);
+  disableDevTools(sendWorkerWindow);
+  disableDevTools(monitorWorkerWindow);
   openAppLinksExternally(mainWindow);
 
-  // Inject fluxnotes API engine on page load
-  hiddenWorkerWindow.webContents.on('did-finish-load', async () => {
-    const currentUrl = hiddenWorkerWindow.webContents.getURL();
+  sendWorkerWindow.webContents.on('did-finish-load', async () => {
+    const currentUrl = sendWorkerWindow.webContents.getURL();
     if (currentUrl.includes('chatgpt.com') && chatGptEngineScript) {
       try {
-        await hiddenWorkerWindow.webContents.executeJavaScript(chatGptEngineScript);
-        const hasLoginText = await hiddenWorkerWindow.webContents.executeJavaScript(`
+        await sendWorkerWindow.webContents.executeJavaScript(chatGptEngineScript);
+        const hasLoginText = await sendWorkerWindow.webContents.executeJavaScript(`
           document.body ? /\\b(Log in|Sign up)\\b/.test(document.body.innerText) : true
         `);
         isChatGptLoggedIn = !hasLoginText;
-        console.log("[ELECTRON] fluxnotes Engine injected successfully.");
+        console.log("[ELECTRON] fluxnotes Engine injected into sendWorker.");
       } catch (err) {
-        console.error("[ELECTRON] Failed to inject fluxnotes engine:", err);
+        console.error("[ELECTRON] Failed to inject fluxnotes engine into sendWorker:", err);
       }
     }
+  });
+
+  function shouldStripChatGptResource(details) {
+    try {
+      const requestUrl = new URL(details.url);
+      const isChatGpt = requestUrl.hostname === 'chatgpt.com'
+        || requestUrl.hostname.endsWith('.chatgpt.com')
+        || requestUrl.hostname.endsWith('.oaistatic.com');
+      if (!isChatGpt) return false;
+
+      const resourceType = (details.resourceType || '').toLowerCase();
+      const pathname = requestUrl.pathname + requestUrl.search;
+
+      const isStylesheet = resourceType === 'stylesheet' || /\.css(?:$|[?#])/i.test(pathname);
+      const isFont = resourceType === 'font' || /\.(?:woff2?|ttf|otf|eot)(?:$|[?#])/i.test(pathname);
+      const isImage = resourceType === 'image' || /\.(?:png|jpe?g|gif|webp|svg|ico)(?:$|[?#])/i.test(pathname);
+      const isMedia = resourceType === 'media' || resourceType === 'video' || resourceType === 'audio';
+      const isScriptTailwindy = resourceType === 'script' && (/tailwind/i.test(pathname) || /cdn/i.test(pathname));
+      const isOtherFat = resourceType === 'other' && (/\.(?:css|woff2?|ttf|otf|eot|png|jpe?g|gif|webp|svg|ico|mp4|webm|mp3)(?:$|[?#])/i.test(pathname));
+
+      // NEVER strip API requests, the root HTML page, auth/session, or XHR/fetch/subFrame navigation
+      const isApi = requestUrl.pathname.startsWith('/backend-api/')
+        || requestUrl.pathname.startsWith('/api/')
+        || requestUrl.pathname === '/'
+        || /\/c\/[^/?#]+/.test(requestUrl.pathname);
+      const isDynamic = ['xhr', 'fetch', 'document', 'main_frame', 'sub_frame', 'websocket', 'script'].includes(resourceType) && !isScriptTailwindy;
+      if (isApi || isDynamic) return false;
+
+      return isStylesheet || isFont || isImage || isMedia || isScriptTailwindy || isOtherFat;
+    } catch {
+      return false;
+    }
+  }
+
+  // Aggressive stripping on the monitor worker: cancel stylesheets, fonts, images, media, tailwind CDN scripts
+  monitorWorkerWindow.webContents.session.webRequest.onBeforeRequest(
+    { urls: ['<all_urls>'] },
+    (details, callback) => {
+      let cancel = false;
+      try {
+        const requestUrl = new URL(details.url);
+        const isChatGptAsset = requestUrl.hostname === 'chatgpt.com'
+          || requestUrl.hostname.endsWith('.chatgpt.com')
+          || requestUrl.hostname.endsWith('.oaistatic.com');
+        if (isChatGptAsset) {
+          cancel = shouldStripChatGptResource(details);
+        }
+      } catch {
+        // Non-web schemes (devtools:// etc.) stay loadable
+      }
+      callback({ cancel });
+    },
+  );
+
+  // Also apply the milder original CSS-only strip on sendWorker so it stays fast but functional
+  sendWorkerWindow.webContents.session.webRequest.onBeforeRequest(
+    { urls: ['<all_urls>'] },
+    (details, callback) => {
+      let cancel = false;
+      try {
+        const requestUrl = new URL(details.url);
+        const isChatGptAsset = requestUrl.hostname === 'chatgpt.com'
+          || requestUrl.hostname.endsWith('.chatgpt.com')
+          || requestUrl.hostname.endsWith('.oaistatic.com');
+        const looksLikeStylesheet = (details.resourceType === 'stylesheet')
+          || /\.css(?:$|[?#])/i.test(requestUrl.pathname + requestUrl.search);
+        cancel = isChatGptAsset && looksLikeStylesheet;
+      } catch {
+        // Non-web schemes stay loadable.
+      }
+      callback({ cancel });
+    },
+  );
+
+  // Estuary capture applies at session level (both windows share same partition so this one interceptor is enough)
+  sendWorkerWindow.webContents.session.webRequest.onCompleted({
+    urls: ['https://chatgpt.com/backend-api/estuary/content*']
+  }, async (details) => {
+    if (!isCapturingImages) return;
+    console.log("[ELECTRON] Image found! URL:", details.url);
+    await downloadGeneratedImage(details.url);
   });
 
   if (app.isPackaged) {
@@ -684,14 +933,17 @@ const createWindow = async () => {
     mainWindow.loadURL("http://localhost:3000");
   }
 
-  await hiddenWorkerWindow.loadURL("https://chatgpt.com/");
+  await sendWorkerWindow.loadURL("https://chatgpt.com/");
+  void monitorWorkerWindow.loadURL("https://chatgpt.com/");
 
   if (forceShowWorker) {
     mainWindow.show();
-    hiddenWorkerWindow.show();
+    sendWorkerWindow.show();
+    monitorWorkerWindow.show();
     if (forceAllowDevTools) {
       mainWindow.webContents.openDevTools();
-      hiddenWorkerWindow.webContents.openDevTools();
+      sendWorkerWindow.webContents.openDevTools();
+      monitorWorkerWindow.webContents.openDevTools();
     }
   } else {
     startLoginCheckRoutine();
@@ -705,33 +957,6 @@ const createWindow = async () => {
 
   const existingRecords = await getStoredRecords();
   existingRecords.forEach(rec => processedUrls.add(rec.id));
-
-  hiddenWorkerWindow.webContents.session.webRequest.onBeforeRequest(
-    { urls: ['<all_urls>'] },
-    (details, callback) => {
-      let isChatGptStylesheet = false;
-      try {
-        const requestUrl = new URL(details.url);
-        const isChatGptAsset = requestUrl.hostname === 'chatgpt.com'
-          || requestUrl.hostname.endsWith('.chatgpt.com')
-          || requestUrl.hostname.endsWith('.oaistatic.com');
-        const looksLikeStylesheet = details.resourceType === 'stylesheet'
-          || /\.css(?:$|[?#])/i.test(requestUrl.pathname + requestUrl.search);
-        isChatGptStylesheet = isChatGptAsset && looksLikeStylesheet;
-      } catch {
-        // Non-web schemes (such as devtools://) must remain loadable.
-      }
-      callback({ cancel: isChatGptStylesheet });
-    },
-  );
-
-  hiddenWorkerWindow.webContents.session.webRequest.onCompleted({
-    urls: ['https://chatgpt.com/backend-api/estuary/content*']
-  }, async (details) => {
-    if (!isCapturingImages) return;
-    console.log("[ELECTRON] Image found! URL:", details.url);
-    await downloadGeneratedImage(details.url);
-  });
 };
 
 ipcMain.handle('get-stored-images', async () => {
@@ -749,7 +974,7 @@ ipcMain.on('window-maximize', () => {
 ipcMain.on('window-close', () => mainWindow?.close());
 
 ipcMain.handle('fill-chatgpt-input', async (event, userText) => {
-  if (!hiddenWorkerWindow) return false;
+  if (!sendWorkerWindow) return false;
 
   const imagePayload = getImageGenerationPayload(userText);
 
@@ -765,8 +990,8 @@ ipcMain.handle('fill-chatgpt-input', async (event, userText) => {
   if (!imagePayload && pendingChatUrl) {
     const chatUrl = pendingChatUrl;
     pendingChatUrl = null;
-    if (hiddenWorkerWindow.webContents.getURL() !== chatUrl) {
-      await hiddenWorkerWindow.loadURL(chatUrl);
+    if (sendWorkerWindow.webContents.getURL() !== chatUrl) {
+      await sendWorkerWindow.loadURL(chatUrl);
     }
   }
 
@@ -776,8 +1001,11 @@ ipcMain.handle('fill-chatgpt-input', async (event, userText) => {
     const imageDownloaded = imagePayload
       ? waitForImageDownload(activeGenerationPageNumber)
       : null;
+
     if (imagePayload) {
       isCapturingImages = true;
+      stopProgressPolling();
+      console.log('[PROGRESS] Image generation request dispatched. (Monitor-window reload disabled by user.)');
     }
 
     let promptContent = "";
@@ -791,10 +1019,10 @@ ipcMain.handle('fill-chatgpt-input', async (event, userText) => {
     }
 
     // 1. Ensure fluxnotes Engine is injected
-    const isEngineLoaded = await hiddenWorkerWindow.webContents.executeJavaScript(`typeof window.__fluxnotesChatGPT !== 'undefined'`);
+    const isEngineLoaded = await sendWorkerWindow.webContents.executeJavaScript(`typeof window.__fluxnotesChatGPT !== 'undefined'`);
     if (!isEngineLoaded && chatGptEngineScript) {
       console.log("[ELECTRON] fluxnotes engine missing. Injecting now...");
-      await hiddenWorkerWindow.webContents.executeJavaScript(chatGptEngineScript);
+      await sendWorkerWindow.webContents.executeJavaScript(chatGptEngineScript);
     }
 
     // The Electron process owns the session. The page never restores a session
@@ -815,7 +1043,7 @@ ipcMain.handle('fill-chatgpt-input', async (event, userText) => {
         };
       `
       : 'window.__fluxnotesOnContent = null;';
-    const result = await hiddenWorkerWindow.webContents.executeJavaScript(`
+    const result = await sendWorkerWindow.webContents.executeJavaScript(`
       (async function() {
         if (!window.__fluxnotesChatGPT) {
           throw new Error("fluxnotes engine not loaded.");
@@ -837,35 +1065,148 @@ ipcMain.handle('fill-chatgpt-input', async (event, userText) => {
         }
 
         console.log("[INJECTION] Sending user query to the same conversation thread...");
-        const finalOutput = await window.__fluxnotesChatGPT.send(usrText, 'chatgpt', null, sessionId);
-        const activeConvoId = window.__fluxnotesChatGPT.getConversationId(sessionId);
+        const genOut = await window.__fluxnotesChatGPT.send(usrText, 'chatgpt', null, sessionId);
+        const genText = typeof genOut.text === 'string' ? genOut.text : (typeof genOut === 'string' ? genOut : '');
+        const genMessageId = genOut.messageId || null;
+        const activeConvoId = genOut.conversationId || window.__fluxnotesChatGPT.getConversationId(sessionId);
+        console.log("[INJECTION] Generation response:", { textLen: genText.length, genMessageId, activeConvoId });
+
+        let finalOutput = genOut;
+        const handshakeTurns = [];
+        const allGeneratedImages = Array.isArray(genOut.generatedImages) ? genOut.generatedImages.slice() : [];
+
+        const isEmptyGen = !genText.trim() || (genText.trim().length < 40 && !/IMAGE_GENERATED|SEND_IMAGE_INFO/.test(genText));
+        if (isEmptyGen) {
+          console.log("[INJECTION] Empty generation response detected. genMessageId=", genMessageId, "— Sending SEND_IMAGE_INFO handshake after 5s...");
+          handshakeTurns.push({ phase: 'generation', text: genText, messageId: genMessageId, empty: true });
+          await new Promise(resolve => setTimeout(resolve, 5000));
+          const handshakePayload = JSON.stringify({ status: "SEND_IMAGE_INFO" });
+          const infoOut = await window.__fluxnotesChatGPT.send(handshakePayload, 'chatgpt', null, sessionId);
+          const infoText = typeof infoOut.text === 'string' ? infoOut.text : (typeof infoOut === 'string' ? infoOut : '');
+          handshakeTurns.push({ phase: 'handshake', text: infoText, messageId: infoOut.messageId || null, empty: !infoText.trim() });
+          if (Array.isArray(infoOut.generatedImages)) {
+            for (let i = 0; i < infoOut.generatedImages.length; i++) allGeneratedImages.push(infoOut.generatedImages[i]);
+          }
+          finalOutput = {
+            text: infoText || genText,
+            messageId: infoOut.messageId || genMessageId,
+            conversationId: infoOut.conversationId || activeConvoId,
+            generationId: infoOut.generationId || genOut.generationId,
+            fileId: infoOut.fileId || genOut.fileId,
+            generatedImages: allGeneratedImages,
+          };
+        }
+
+        const useMessageId = finalOutput.messageId || null;
+        const downloadMessageId = (isEmptyGen && genMessageId) ? genMessageId : useMessageId;
+        console.log("[INJECTION] Final turn text:", finalOutput.text ? finalOutput.text.length : 0, "chars. Using for sandbox download, messageId=", downloadMessageId);
+
+        const generatedImages = Array.isArray(finalOutput.generatedImages) ? finalOutput.generatedImages : [];
+        const sandboxDownloads = [];
+        for (let gi = 0; gi < generatedImages.length; gi++) {
+          const img = generatedImages[gi];
+          if (img && img.imagePath && downloadMessageId && typeof window.__fluxnotesChatGPT.downloadSandboxImage === 'function') {
+            sandboxDownloads.push(
+              window.__fluxnotesChatGPT.downloadSandboxImage(img.imagePath, downloadMessageId, sessionId)
+                .then((d) => ({ ...img, download: d, downloadedWithMessageId: downloadMessageId }))
+                .catch((e) => ({ ...img, downloadError: String(e && e.message || e), downloadedWithMessageId: downloadMessageId }))
+            );
+          }
+        }
+        const downloadedImages = sandboxDownloads.length ? await Promise.all(sandboxDownloads) : [];
 
         return {
-          rawText: finalOutput,
-          conversationId: activeConvoId,
+          rawText: String(finalOutput.text == null ? '' : finalOutput.text),
+          messageId: useMessageId,
+          generationMessageId: genMessageId,
+          handshakeTurns: handshakeTurns,
+          conversationId: finalOutput.conversationId || activeConvoId,
           session: window.__fluxnotesChatGPT.getSession(sessionId),
+          generationId: finalOutput.generationId || null,
+          fileId: finalOutput.fileId || null,
+          generatedImages: generatedImages,
+          downloadedSandboxImages: downloadedImages,
         };
+
+        
       })();
     `);
 
     if (result) {
-      const { rawText = "", conversationId, session } = result;
+      const { rawText = "", conversationId, messageId, session, generationId, fileId, generatedImages, downloadedSandboxImages, generationMessageId, handshakeTurns } = result;
       activeChatSession = session || activeChatSession;
+
+      appendToResultJson({
+        sessionId: sessionId || null,
+        messageId: messageId || null,
+        generationMessageId: generationMessageId || null,
+        conversationId: conversationId || null,
+        generationId: generationId || null,
+        fileId: fileId || null,
+        response: typeof rawText === 'string' ? rawText : String(rawText ?? ''),
+        generatedImages: generatedImages || null,
+        handshakeTurns: Array.isArray(handshakeTurns) && handshakeTurns.length ? handshakeTurns : null,
+      });
+
+      if (Array.isArray(downloadedSandboxImages) && downloadedSandboxImages.length > 0) {
+        for (const img of downloadedSandboxImages) {
+          if (!img || !img.download || !img.download.base64) continue;
+          const base64Data = String(img.download.base64);
+          const ext = (img.download.mimeType && img.download.mimeType.split('/')[1]) || 'png';
+          const safeExt = ext === 'jpeg' ? 'jpg' : ext.replace(/[^a-zA-Z0-9]/g, '');
+          const imageFileId = img.download.fileId || img.fileId || fileId;
+          const recordId = imageFileId || generationId || generationMessageId || messageId || `sandbox_${Date.now()}`;
+          const safeFileId = safeFileName(String(imageFileId || String(img.download.fileName || recordId)).slice(0, 80));
+          const filePath = path.join(imagesDir, `${safeFileId}.${safeExt}`);
+          try {
+            fs.writeFileSync(filePath, base64Data, 'base64');
+            console.log("[ELECTRON] Sandbox image saved (by fileId):", filePath);
+            await saveRecordToDb({
+              id: recordId,
+              fileId: imageFileId || img.fileId || fileId || null,
+              filePath,
+              timestamp: Date.now(),
+              source: 'sandbox',
+              generationId: img.generationId || generationId || null,
+              messageId: img.downloadedWithMessageId || generationMessageId || messageId || null,
+              fileName: img.download.fileName || null,
+            });
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('new-image', { filePath: toLocalImageUrl(filePath), pageNumber: activeGenerationPageNumber });
+            }
+            if (activeImageDownload && activeImageDownload.pageNumber === activeGenerationPageNumber) {
+              activeImageDownload.resolve(filePath);
+            }
+          } catch (saveErr) {
+            console.error("[ELECTRON] Failed to save sandbox image locally:", saveErr.message);
+          }
+        }
+      }
 
       if (imagePayload) {
         if (conversationId) {
           const targetChatUrl = `https://chatgpt.com/c/${conversationId}`;
-          console.log("[ELECTRON] Reloading generated-image conversation:", targetChatUrl);
-          await hiddenWorkerWindow.loadURL(targetChatUrl);
+          console.log("[ELECTRON] (sendWorker/monitorWorker sync disabled by user) Would navigate to:", targetChatUrl);
         }
 
         const generatedImageUrls = extractGeneratedImageUrls(rawText);
-        await Promise.all(generatedImageUrls.map(downloadGeneratedImage));
-        await imageDownloaded;
+        void Promise.all(generatedImageUrls.map(downloadGeneratedImage));
+
+        try {
+          await imageDownloaded;
+        } finally {
+          stopProgressPolling();
+        }
         return {
           chatUrl: conversationId ? `https://chatgpt.com/c/${conversationId}` : undefined,
           chatSessionId: sessionId,
           chatSession: activeChatSession,
+          messageId: messageId,
+          generationMessageId: generationMessageId,
+          generationId: generationId,
+          fileId: fileId,
+          generatedImages: generatedImages,
+          handshakeTurns: Array.isArray(handshakeTurns) && handshakeTurns.length ? handshakeTurns : null,
         };
       }
 
@@ -874,13 +1215,10 @@ ipcMain.handle('fill-chatgpt-input', async (event, userText) => {
       // Text responses are rendered once so their chat URL remains available.
       if (conversationId) {
         const targetChatUrl = `https://chatgpt.com/c/${conversationId}`;
-        const currentWorkerUrl = hiddenWorkerWindow.webContents.getURL();
+        const currentWorkerUrl = sendWorkerWindow.webContents.getURL();
 
         if (currentWorkerUrl !== targetChatUrl) {
-          console.log("[ELECTRON] Navigating worker window to active chat thread for image processing:", targetChatUrl);
-          await hiddenWorkerWindow.loadURL(targetChatUrl);
-          // Give the page a few seconds to render content so webRequest.onCompleted captures assets cleanly
-          await new Promise(resolve => setTimeout(resolve, 4000));
+          console.log("[ELECTRON] (sendWorker/monitorWorker sync disabled by user) Would navigate from:", currentWorkerUrl, "->", targetChatUrl);
         }
       }
 
@@ -893,24 +1231,60 @@ ipcMain.handle('fill-chatgpt-input', async (event, userText) => {
         }
         jsonData.chatSessionId = sessionId;
         jsonData.chatSession = activeChatSession;
+        if (messageId) jsonData.messageId = messageId;
+        if (generationMessageId) jsonData.generationMessageId = generationMessageId;
+        if (generationId) jsonData.generationId = generationId;
+        if (fileId) jsonData.fileId = fileId;
+        if (Array.isArray(generatedImages)) jsonData.generatedImages = generatedImages;
+        if (Array.isArray(handshakeTurns) && handshakeTurns.length) jsonData.handshakeTurns = handshakeTurns;
 
         console.log("[ELECTRON] Successfully processed conversation and images:", jsonData.topicName);
         return jsonData;
       } catch (parseErr) {
         console.error("[ELECTRON] JSON Parse Error:", parseErr.message);
-        return { error: "Failed to parse JSON", raw: rawText };
+        return { error: "Failed to parse JSON", raw: rawText, messageId: messageId, generationMessageId: generationMessageId, conversationId: conversationId, generationId, fileId, generatedImages, handshakeTurns: Array.isArray(handshakeTurns) && handshakeTurns.length ? handshakeTurns : null };
       }
     }
     return null;
 
   } catch (err) {
     console.error("Failed to execute fluxnotes API script:", err);
+    appendToResultJson({
+      sessionId: sessionId || null,
+      error: err && err.message ? String(err.message) : String(err),
+      errorStack: err && err.stack ? String(err.stack) : null,
+    });
     return false;
   }
   finally {
     isCapturingImages = false;
     activeGenerationPageNumber = null;
     cancelImageDownloadWait();
+    stopProgressPolling();
+  }
+});
+// Setup Results Directory inside User Data Folder
+const resultsDir = path.join(app.getPath('userData'), 'results');
+if (!fs.existsSync(resultsDir)) {
+  fs.mkdirSync(resultsDir, { recursive: true });
+}
+
+ipcMain.handle('save-raw-result', async (_, { sessionId, rawContent, conversationId }) => {
+  try {
+    const safeId = (sessionId || 'default').replace(/[<>:"/\\|?*\x00-\x1F]/g, '_');
+    const resultFilePath = path.join(resultsDir, `result-${safeId}.json`);
+    const fileData = {
+      sessionId,
+      conversationId: conversationId || null,
+      timestamp: Date.now(),
+      rawResponse: rawContent
+    };
+    await fs.promises.writeFile(resultFilePath, JSON.stringify(fileData, null, 2), 'utf-8');
+    console.log("[ELECTRON] Raw result saved to:", resultFilePath);
+    return { success: true };
+  } catch (err) {
+    console.error("Failed to save raw result file:", err);
+    return { success: false, error: err.message };
   }
 });
 

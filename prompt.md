@@ -57,8 +57,39 @@ You can continue to generate next image when you get a JSON input as
   pageNumber: ""
 }
 ```
+### Your Image Response
 
-REMEBER TO MAKE YOUR IMAGE IN A4 SIZE PAPER FORMAT
+After your image generation, you will get json response like this:
+
+```json
+{
+  status:"SEND_IMAGE_INFO"
+}
+```
+
+for whih YOU HAVE TO REPLY WITH THE PATH OF THE IMAGE, STORED IN YOUR SYSTEM, and your response should be like this:
+
+```json
+{
+  status:"IMAGE_GENERATED",
+  imagePath:""
+  fileId:"",
+  generationId:""
+}
+```
+
+Example:
+
+```json
+{
+  status:"IMAGE_GENERATED",
+  imagePath:"sandbox:/mnt/data/a_close_up_high_quality_adorable_indoor_scene_a.png",
+  fileId:"file_00000000989c8208aaf794717ffbf35e",
+  generationId:"15c14dab-cfe9-4521-9cc4-e6826a155220"
+}
+```
+
+Make SURE THE DATA IS CORRECT
 
 ### What to take in account and what are your capabilities
 
