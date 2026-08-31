@@ -34,7 +34,7 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "npmnishantsharma",
+      "owner": "codernishantsharma",
       "repo": "FluxNotes"
     },
     "mac": {

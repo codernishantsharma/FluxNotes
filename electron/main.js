@@ -88,14 +88,15 @@ function disableDevTools(window) {
 
 function openAppLinksExternally(window) {
   window.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url);
-    return { action: 'deny' };
+    // Force all window openings and popups to load internally within the Electron session
+    return { action: 'allow' };
   });
   window.webContents.on('will-navigate', (event, url) => {
+    // Never allow any navigation to trigger external browser opening
     const isAppUrl = app.isPackaged ? url.startsWith('app://') : url.startsWith('http://localhost:3000');
-    if (!isAppUrl) {
-      event.preventDefault();
-      void shell.openExternal(url);
+    if (!isAppUrl && !url.includes('chatgpt.com') && !url.includes('auth')) {
+      // Keep everything internal to the worker or main window contexts
+      return;
     }
   });
 }
@@ -103,6 +104,37 @@ function openAppLinksExternally(window) {
 function isChatGptUrl(url) {
   try {
     return new URL(url).hostname === 'chatgpt.com';
+  } catch {
+    return false;
+  }
+}
+
+function isAuthProviderUrl(url) {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    const authHosts = [
+      'accounts.google.com',
+      'google.com',
+      'login.microsoftonline.com',
+      'login.live.com',
+      'microsoft.com',
+      'appleid.apple.com',
+      'github.com',
+      'githubusercontent.com',
+      'auth0.com',
+      'okta.com',
+      'facebook.com',
+      'twitter.com',
+      'x.com',
+      'linkedin.com',
+      'discord.com',
+    ];
+    for (const authHost of authHosts) {
+      if (host === authHost || host.endsWith('.' + authHost)) {
+        return true;
+      }
+    }
+    return false;
   } catch {
     return false;
   }
@@ -745,6 +777,21 @@ function startLoginCheckRoutine() {
     if (!sendWorkerWindow || sendWorkerWindow.isDestroyed()) return;
     try {
       const currentUrl = sendWorkerWindow.webContents.getURL();
+      const onAuthProvider = isAuthProviderUrl(currentUrl);
+
+      if (onAuthProvider) {
+        if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
+          console.log("[ELECTRON] Hiding main window during external auth flow.");
+          mainWindow.hide();
+        }
+        if (sendWorkerWindow && !sendWorkerWindow.isVisible()) {
+          console.log("[ELECTRON] Showing send worker window for auth provider login.");
+          sendWorkerWindow.show();
+          sendWorkerWindow.focus();
+        }
+        return;
+      }
+
       if (!currentUrl.includes('chatgpt.com')) {
         return;
       }
@@ -784,12 +831,14 @@ function startLoginCheckRoutine() {
 }
 
 const createWindow = async () => {
+  const appIconPath = path.join(__dirname, '../icons/favicon.png'); // Adjust to your actual icon file path
+
   mainWindow = new BrowserWindow({
     width: 800,
     height: 600,
     show: false,
     frame: false,
-    icon: path.join(__dirname, '../app/icon.png'),
+    icon: appIconPath,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -802,6 +851,8 @@ const createWindow = async () => {
     width: 800,
     height: 600,
     show: false,
+    frame: false,
+    icon: appIconPath,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -813,6 +864,8 @@ const createWindow = async () => {
     width: 800,
     height: 600,
     show: false,
+    frame:false,
+    icon: appIconPath,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -823,7 +876,11 @@ const createWindow = async () => {
   disableDevTools(mainWindow);
   disableDevTools(sendWorkerWindow);
   disableDevTools(monitorWorkerWindow);
+
+  // Apply external link protection to ALL windows so no webviews accidentally navigate away internally
   openAppLinksExternally(mainWindow);
+  openAppLinksExternally(sendWorkerWindow);
+  openAppLinksExternally(monitorWorkerWindow);
 
   sendWorkerWindow.webContents.on('did-finish-load', async () => {
     const currentUrl = sendWorkerWindow.webContents.getURL();
@@ -842,38 +899,42 @@ const createWindow = async () => {
   });
 
   function shouldStripChatGptResource(details) {
-    try {
-      const requestUrl = new URL(details.url);
-      const isChatGpt = requestUrl.hostname === 'chatgpt.com'
-        || requestUrl.hostname.endsWith('.chatgpt.com')
-        || requestUrl.hostname.endsWith('.oaistatic.com');
-      if (!isChatGpt) return false;
+    return false;
+    // try {
+    //   const requestUrl = new URL(details.url);
+    //   const isChatGpt = requestUrl.hostname === 'chatgpt.com'
+    //     || requestUrl.hostname.endsWith('.chatgpt.com')
+    //     || requestUrl.hostname.endsWith('.oaistatic.com');
+    //   if (!isChatGpt) return false;
 
-      const resourceType = (details.resourceType || '').toLowerCase();
-      const pathname = requestUrl.pathname + requestUrl.search;
+    //   // If the user is not logged in or is on an auth page, never strip CSS/stylesheets
+    //   if (!isChatGptLoggedIn || requestUrl.pathname.includes('/auth') || requestUrl.pathname.includes('/login')) {
+    //     return false;
+    //   }
 
-      const isStylesheet = resourceType === 'stylesheet' || /\.css(?:$|[?#])/i.test(pathname);
-      const isFont = resourceType === 'font' || /\.(?:woff2?|ttf|otf|eot)(?:$|[?#])/i.test(pathname);
-      const isImage = resourceType === 'image' || /\.(?:png|jpe?g|gif|webp|svg|ico)(?:$|[?#])/i.test(pathname);
-      const isMedia = resourceType === 'media' || resourceType === 'video' || resourceType === 'audio';
-      const isScriptTailwindy = resourceType === 'script' && (/tailwind/i.test(pathname) || /cdn/i.test(pathname));
-      const isOtherFat = resourceType === 'other' && (/\.(?:css|woff2?|ttf|otf|eot|png|jpe?g|gif|webp|svg|ico|mp4|webm|mp3)(?:$|[?#])/i.test(pathname));
+    //   const resourceType = (details.resourceType || '').toLowerCase();
+    //   const pathname = requestUrl.pathname + requestUrl.search;
 
-      // NEVER strip API requests, the root HTML page, auth/session, or XHR/fetch/subFrame navigation
-      const isApi = requestUrl.pathname.startsWith('/backend-api/')
-        || requestUrl.pathname.startsWith('/api/')
-        || requestUrl.pathname === '/'
-        || /\/c\/[^/?#]+/.test(requestUrl.pathname);
-      const isDynamic = ['xhr', 'fetch', 'document', 'main_frame', 'sub_frame', 'websocket', 'script'].includes(resourceType) && !isScriptTailwindy;
-      if (isApi || isDynamic) return false;
+    //   const isStylesheet = resourceType === 'stylesheet' || /\.css(?:$|[?#])/i.test(pathname);
+    //   const isFont = resourceType === 'font' || /\.(?:woff2?|ttf|otf|eot)(?:$|[?#])/i.test(pathname);
+    //   const isImage = resourceType === 'image' || /\.(?:png|jpe?g|gif|webp|svg|ico)(?:$|[?#])/i.test(pathname);
+    //   const isMedia = resourceType === 'media' || resourceType === 'video' || resourceType === 'audio';
+    //   const isScriptTailwindy = resourceType === 'script' && (/tailwind/i.test(pathname) || /cdn/i.test(pathname));
+    //   const isOtherFat = resourceType === 'other' && (/\.(?:css|woff2?|ttf|otf|eot|png|jpe?g|gif|webp|svg|ico|mp4|webm|mp3)(?:$|[?#])/i.test(pathname));
 
-      return isStylesheet || isFont || isImage || isMedia || isScriptTailwindy || isOtherFat;
-    } catch {
-      return false;
-    }
+    //   const isApi = requestUrl.pathname.startsWith('/backend-api/')
+    //     || requestUrl.pathname.startsWith('/api/')
+    //     || requestUrl.pathname === '/'
+    //     || /\/c\/[^/?#]+/.test(requestUrl.pathname);
+    //   const isDynamic = ['xhr', 'fetch', 'document', 'main_frame', 'sub_frame', 'websocket', 'script'].includes(resourceType) && !isScriptTailwindy;
+    //   if (isApi || isDynamic) return false;
+
+    //   return isStylesheet || isFont || isImage || isMedia || isScriptTailwindy || isOtherFat;
+    // } catch {
+    //   return false;
+    // }
   }
 
-  // Aggressive stripping on the monitor worker: cancel stylesheets, fonts, images, media, tailwind CDN scripts
   monitorWorkerWindow.webContents.session.webRequest.onBeforeRequest(
     { urls: ['<all_urls>'] },
     (details, callback) => {
@@ -884,16 +945,13 @@ const createWindow = async () => {
           || requestUrl.hostname.endsWith('.chatgpt.com')
           || requestUrl.hostname.endsWith('.oaistatic.com');
         if (isChatGptAsset) {
-          cancel = shouldStripChatGptResource(details);
+          cancel = false;
         }
-      } catch {
-        // Non-web schemes (devtools:// etc.) stay loadable
-      }
+      } catch {}
       callback({ cancel });
     },
   );
 
-  // Also apply the milder original CSS-only strip on sendWorker so it stays fast but functional
   sendWorkerWindow.webContents.session.webRequest.onBeforeRequest(
     { urls: ['<all_urls>'] },
     (details, callback) => {
@@ -905,15 +963,12 @@ const createWindow = async () => {
           || requestUrl.hostname.endsWith('.oaistatic.com');
         const looksLikeStylesheet = (details.resourceType === 'stylesheet')
           || /\.css(?:$|[?#])/i.test(requestUrl.pathname + requestUrl.search);
-        cancel = isChatGptAsset && looksLikeStylesheet;
-      } catch {
-        // Non-web schemes stay loadable.
-      }
+        cancel = false;
+      } catch {}
       callback({ cancel });
     },
   );
 
-  // Estuary capture applies at session level (both windows share same partition so this one interceptor is enough)
   sendWorkerWindow.webContents.session.webRequest.onCompleted({
     urls: ['https://chatgpt.com/backend-api/estuary/content*']
   }, async (details) => {
@@ -1123,7 +1178,7 @@ ipcMain.handle('fill-chatgpt-input', async (event, userText) => {
           const ext = (img.download.mimeType && img.download.mimeType.split('/')[1]) || 'png';
           const safeExt = ext === 'jpeg' ? 'jpg' : ext.replace(/[^a-zA-Z0-9]/g, '');
           const recordId = img.fileId || fileId || generationId || messageId || `sandbox_${Date.now()}`;
-          const filePath = path.join(imagesDir, `note_sandbox_${safeFilename(String(img.fileId || String(img.download.imagePath || recordId)).slice(0, 40))}_${Date.now()}.${safeExt}`);
+          const filePath = path.join(imagesDir, `note_sandbox_${safeFileName(String(img.fileId || String(img.download.imagePath || recordId)).slice(0, 40))}_${Date.now()}.${safeExt}`);
           try {
             fs.writeFileSync(filePath, base64Data, 'base64');
             console.log("[ELECTRON] Sandbox image saved locally:", filePath);
