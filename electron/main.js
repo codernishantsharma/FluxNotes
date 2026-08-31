@@ -494,14 +494,10 @@ async function downloadGeneratedImage(imgUrl) {
     if (!base64) return null;
 
     const base64Data = base64.replace(/^data:image\/\w+;base64,/, "");
-    const mimeMatch = base64.match(/^data:image\/(\w+);base64,/);
-    const rawExt = mimeMatch ? mimeMatch[1].toLowerCase() : 'png';
-    const safeExt = rawExt === 'jpeg' ? 'jpg' : rawExt.replace(/[^a-zA-Z0-9]/g, '');
-    const safeFileId = safeFileName(String(fileId).slice(0, 100));
-    const filePath = path.join(imagesDir, `${safeFileId}.${safeExt}`);
+    const filePath = path.join(imagesDir, `note_${fileId}_${Date.now()}.png`);
     fs.writeFileSync(filePath, base64Data, 'base64');
-    console.log("[ELECTRON] Successfully downloaded and saved image (by fileId):", filePath);
-    await saveRecordToDb({ id: fileId, fileId: fileId, filePath, timestamp: Date.now(), source: 'estuary' });
+    console.log("[ELECTRON] Successfully downloaded and saved image locally to:", filePath);
+    await saveRecordToDb({ id: fileId, filePath, timestamp: Date.now() });
 
     if (mainWindow) {
       mainWindow.webContents.send('new-image', {
@@ -1005,7 +1001,14 @@ ipcMain.handle('fill-chatgpt-input', async (event, userText) => {
     if (imagePayload) {
       isCapturingImages = true;
       stopProgressPolling();
-      console.log('[PROGRESS] Image generation request dispatched. (Monitor-window reload disabled by user.)');
+      console.log('[PROGRESS] Image generation request dispatched. Starting 10s timer NOW (will not disturb send).');
+
+      // Kick off the progress timeline immediately, in parallel with the send.
+      // After 10s we reload the *monitor* worker (never the send worker), so
+      // the streaming send in sendWorkerWindow remains completely undisturbed.
+      progressReloadTimeout = setTimeout(() => {
+        void reloadAndTrackProgress();
+      }, 10000);
     }
 
     let promptContent = "";
@@ -1065,62 +1068,29 @@ ipcMain.handle('fill-chatgpt-input', async (event, userText) => {
         }
 
         console.log("[INJECTION] Sending user query to the same conversation thread...");
-        const genOut = await window.__fluxnotesChatGPT.send(usrText, 'chatgpt', null, sessionId);
-        const genText = typeof genOut.text === 'string' ? genOut.text : (typeof genOut === 'string' ? genOut : '');
-        const genMessageId = genOut.messageId || null;
-        const activeConvoId = genOut.conversationId || window.__fluxnotesChatGPT.getConversationId(sessionId);
-        console.log("[INJECTION] Generation response:", { textLen: genText.length, genMessageId, activeConvoId });
-
-        let finalOutput = genOut;
-        const handshakeTurns = [];
-        const allGeneratedImages = Array.isArray(genOut.generatedImages) ? genOut.generatedImages.slice() : [];
-
-        const isEmptyGen = !genText.trim() || (genText.trim().length < 40 && !/IMAGE_GENERATED|SEND_IMAGE_INFO/.test(genText));
-        if (isEmptyGen) {
-          console.log("[INJECTION] Empty generation response detected. genMessageId=", genMessageId, "— Sending SEND_IMAGE_INFO handshake after 5s...");
-          handshakeTurns.push({ phase: 'generation', text: genText, messageId: genMessageId, empty: true });
-          await new Promise(resolve => setTimeout(resolve, 5000));
-          const handshakePayload = JSON.stringify({ status: "SEND_IMAGE_INFO" });
-          const infoOut = await window.__fluxnotesChatGPT.send(handshakePayload, 'chatgpt', null, sessionId);
-          const infoText = typeof infoOut.text === 'string' ? infoOut.text : (typeof infoOut === 'string' ? infoOut : '');
-          handshakeTurns.push({ phase: 'handshake', text: infoText, messageId: infoOut.messageId || null, empty: !infoText.trim() });
-          if (Array.isArray(infoOut.generatedImages)) {
-            for (let i = 0; i < infoOut.generatedImages.length; i++) allGeneratedImages.push(infoOut.generatedImages[i]);
-          }
-          finalOutput = {
-            text: infoText || genText,
-            messageId: infoOut.messageId || genMessageId,
-            conversationId: infoOut.conversationId || activeConvoId,
-            generationId: infoOut.generationId || genOut.generationId,
-            fileId: infoOut.fileId || genOut.fileId,
-            generatedImages: allGeneratedImages,
-          };
-        }
-
+        const finalOutput = await window.__fluxnotesChatGPT.send(usrText, 'chatgpt', null, sessionId);
+        const activeConvoId = finalOutput.conversationId || window.__fluxnotesChatGPT.getConversationId(sessionId);
         const useMessageId = finalOutput.messageId || null;
-        const downloadMessageId = (isEmptyGen && genMessageId) ? genMessageId : useMessageId;
-        console.log("[INJECTION] Final turn text:", finalOutput.text ? finalOutput.text.length : 0, "chars. Using for sandbox download, messageId=", downloadMessageId);
+        console.log(finalOutput);
 
         const generatedImages = Array.isArray(finalOutput.generatedImages) ? finalOutput.generatedImages : [];
         const sandboxDownloads = [];
         for (let gi = 0; gi < generatedImages.length; gi++) {
           const img = generatedImages[gi];
-          if (img && img.imagePath && downloadMessageId && typeof window.__fluxnotesChatGPT.downloadSandboxImage === 'function') {
+          if (img && img.imagePath && useMessageId && typeof window.__fluxnotesChatGPT.downloadSandboxImage === 'function') {
             sandboxDownloads.push(
-              window.__fluxnotesChatGPT.downloadSandboxImage(img.imagePath, downloadMessageId, sessionId)
-                .then((d) => ({ ...img, download: d, downloadedWithMessageId: downloadMessageId }))
-                .catch((e) => ({ ...img, downloadError: String(e && e.message || e), downloadedWithMessageId: downloadMessageId }))
+              window.__fluxnotesChatGPT.downloadSandboxImage(img.imagePath, useMessageId, sessionId)
+                .then((d) => ({ ...img, download: d }))
+                .catch((e) => ({ ...img, downloadError: String(e && e.message || e) }))
             );
           }
         }
         const downloadedImages = sandboxDownloads.length ? await Promise.all(sandboxDownloads) : [];
 
         return {
-          rawText: String(finalOutput.text == null ? '' : finalOutput.text),
+          rawText: finalOutput.text || finalOutput,
           messageId: useMessageId,
-          generationMessageId: genMessageId,
-          handshakeTurns: handshakeTurns,
-          conversationId: finalOutput.conversationId || activeConvoId,
+          conversationId: activeConvoId,
           session: window.__fluxnotesChatGPT.getSession(sessionId),
           generationId: finalOutput.generationId || null,
           fileId: finalOutput.fileId || null,
@@ -1133,19 +1103,17 @@ ipcMain.handle('fill-chatgpt-input', async (event, userText) => {
     `);
 
     if (result) {
-      const { rawText = "", conversationId, messageId, session, generationId, fileId, generatedImages, downloadedSandboxImages, generationMessageId, handshakeTurns } = result;
+      const { rawText = "", conversationId, messageId, session, generationId, fileId, generatedImages, downloadedSandboxImages } = result;
       activeChatSession = session || activeChatSession;
 
       appendToResultJson({
         sessionId: sessionId || null,
         messageId: messageId || null,
-        generationMessageId: generationMessageId || null,
         conversationId: conversationId || null,
         generationId: generationId || null,
         fileId: fileId || null,
-        response: typeof rawText === 'string' ? rawText : String(rawText ?? ''),
+        response: rawText,
         generatedImages: generatedImages || null,
-        handshakeTurns: Array.isArray(handshakeTurns) && handshakeTurns.length ? handshakeTurns : null,
       });
 
       if (Array.isArray(downloadedSandboxImages) && downloadedSandboxImages.length > 0) {
@@ -1154,23 +1122,12 @@ ipcMain.handle('fill-chatgpt-input', async (event, userText) => {
           const base64Data = String(img.download.base64);
           const ext = (img.download.mimeType && img.download.mimeType.split('/')[1]) || 'png';
           const safeExt = ext === 'jpeg' ? 'jpg' : ext.replace(/[^a-zA-Z0-9]/g, '');
-          const imageFileId = img.download.fileId || img.fileId || fileId;
-          const recordId = imageFileId || generationId || generationMessageId || messageId || `sandbox_${Date.now()}`;
-          const safeFileId = safeFileName(String(imageFileId || String(img.download.fileName || recordId)).slice(0, 80));
-          const filePath = path.join(imagesDir, `${safeFileId}.${safeExt}`);
+          const recordId = img.fileId || fileId || generationId || messageId || `sandbox_${Date.now()}`;
+          const filePath = path.join(imagesDir, `note_sandbox_${safeFilename(String(img.fileId || String(img.download.imagePath || recordId)).slice(0, 40))}_${Date.now()}.${safeExt}`);
           try {
             fs.writeFileSync(filePath, base64Data, 'base64');
-            console.log("[ELECTRON] Sandbox image saved (by fileId):", filePath);
-            await saveRecordToDb({
-              id: recordId,
-              fileId: imageFileId || img.fileId || fileId || null,
-              filePath,
-              timestamp: Date.now(),
-              source: 'sandbox',
-              generationId: img.generationId || generationId || null,
-              messageId: img.downloadedWithMessageId || generationMessageId || messageId || null,
-              fileName: img.download.fileName || null,
-            });
+            console.log("[ELECTRON] Sandbox image saved locally:", filePath);
+            await saveRecordToDb({ id: recordId, filePath, timestamp: Date.now(), source: 'sandbox', generationId: img.generationId || generationId, fileId: img.fileId || fileId });
             if (mainWindow && !mainWindow.isDestroyed()) {
               mainWindow.webContents.send('new-image', { filePath: toLocalImageUrl(filePath), pageNumber: activeGenerationPageNumber });
             }
@@ -1186,7 +1143,11 @@ ipcMain.handle('fill-chatgpt-input', async (event, userText) => {
       if (imagePayload) {
         if (conversationId) {
           const targetChatUrl = `https://chatgpt.com/c/${conversationId}`;
-          console.log("[ELECTRON] (sendWorker/monitorWorker sync disabled by user) Would navigate to:", targetChatUrl);
+          console.log("[ELECTRON] Syncing sendWorker to conversation:", targetChatUrl);
+          await sendWorkerWindow.loadURL(targetChatUrl);
+          if (monitorWorkerWindow && !monitorWorkerWindow.isDestroyed()) {
+            void monitorWorkerWindow.loadURL(targetChatUrl).catch(() => {});
+          }
         }
 
         const generatedImageUrls = extractGeneratedImageUrls(rawText);
@@ -1202,11 +1163,9 @@ ipcMain.handle('fill-chatgpt-input', async (event, userText) => {
           chatSessionId: sessionId,
           chatSession: activeChatSession,
           messageId: messageId,
-          generationMessageId: generationMessageId,
           generationId: generationId,
           fileId: fileId,
           generatedImages: generatedImages,
-          handshakeTurns: Array.isArray(handshakeTurns) && handshakeTurns.length ? handshakeTurns : null,
         };
       }
 
@@ -1218,7 +1177,13 @@ ipcMain.handle('fill-chatgpt-input', async (event, userText) => {
         const currentWorkerUrl = sendWorkerWindow.webContents.getURL();
 
         if (currentWorkerUrl !== targetChatUrl) {
-          console.log("[ELECTRON] (sendWorker/monitorWorker sync disabled by user) Would navigate from:", currentWorkerUrl, "->", targetChatUrl);
+          console.log("[ELECTRON] Navigating sendWorker to active chat thread:", targetChatUrl);
+          await sendWorkerWindow.loadURL(targetChatUrl);
+          if (monitorWorkerWindow && !monitorWorkerWindow.isDestroyed()) {
+            void monitorWorkerWindow.loadURL(targetChatUrl).catch(() => {});
+          }
+          // Give the page a few seconds to render content so webRequest.onCompleted captures assets cleanly
+          await new Promise(resolve => setTimeout(resolve, 4000));
         }
       }
 
@@ -1232,17 +1197,15 @@ ipcMain.handle('fill-chatgpt-input', async (event, userText) => {
         jsonData.chatSessionId = sessionId;
         jsonData.chatSession = activeChatSession;
         if (messageId) jsonData.messageId = messageId;
-        if (generationMessageId) jsonData.generationMessageId = generationMessageId;
         if (generationId) jsonData.generationId = generationId;
         if (fileId) jsonData.fileId = fileId;
         if (Array.isArray(generatedImages)) jsonData.generatedImages = generatedImages;
-        if (Array.isArray(handshakeTurns) && handshakeTurns.length) jsonData.handshakeTurns = handshakeTurns;
 
         console.log("[ELECTRON] Successfully processed conversation and images:", jsonData.topicName);
         return jsonData;
       } catch (parseErr) {
         console.error("[ELECTRON] JSON Parse Error:", parseErr.message);
-        return { error: "Failed to parse JSON", raw: rawText, messageId: messageId, generationMessageId: generationMessageId, conversationId: conversationId, generationId, fileId, generatedImages, handshakeTurns: Array.isArray(handshakeTurns) && handshakeTurns.length ? handshakeTurns : null };
+        return { error: "Failed to parse JSON", raw: rawText, messageId: messageId, conversationId: conversationId, generationId, fileId, generatedImages };
       }
     }
     return null;
