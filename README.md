@@ -1,36 +1,108 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# FluxNotes
 
-## Getting Started
+FluxNotes helps you turn ideas into clean, visual study notes. You type a prompt, the app builds a note structure, generates page images, and lets you save, revisit, and export everything from one place.
 
-First, run the development server:
+## For users
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+### What the app does
+- Create a new note from the dashboard
+- Generate a study outline and page-by-page visuals
+- Save notes locally so you can come back later
+- Open previous notes and continue from where you left off
+- Export pages as PDF, PNG, or JPEG
+
+### Download the app
+
+Choose the version for your computer:
+
+| Platform | Download type | What you get |
+| --- | --- | --- |
+| Windows | Installer | A standard Windows setup file for installing FluxNotes |
+| Linux | DEB / RPM / archive | A package for Linux users or a portable archive |
+| macOS | DMG | A macOS installer package |
+
+These are the current release formats created by the project’s Electron packaging settings.
+
+### How to use it
+1. Open the app.
+2. Click Create New Note.
+3. Type your prompt or continue a note session.
+4. Wait for the app to generate the pages.
+5. Review the pages, save your note, and export when you want.
+
+### Exporting notes
+You can export your generated notes as:
+- PDF
+- PNG
+- JPEG
+
+### Helpful tips
+- Keep your note names simple so they are easy to find later.
+- If generation seems stuck, restart the app and try again with a fresh note.
+- Saved notes stay on your computer, so you can reopen them anytime.
+
+---
+
+## For developers
+
+### What this project is built with
+- Next.js for the interface
+- Electron for the desktop app
+- TypeScript for app logic
+- SQLite for local note storage
+- Puppeteer and browser automation for the generation flow
+
+### Main folders
+```text
+.
+├── app/              # Frontend screens and pages
+├── electron/         # Electron app logic and worker bridge
+├── icons/            # App icons
+├── public/           # Static assets
+├── prompt.md         # Chat/AI generation instructions
+├── Changelog.md      # Release notes
+├── package.json      # App metadata and build settings
+├── README.md         # Project docs
+└── ...
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Run it locally
+Install dependencies:
+```bash
+npm install
+```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Start the app:
+```bash
+npm run dev
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Useful commands:
+```bash
+npm run build
+npm run build:next
+npm run build:electron
+npm run lint
+```
 
-## Learn More
+### Build details
+The app is configured to build desktop app packages for:
+- Windows: NSIS installer
+- Linux: DEB, RPM, and tar.gz
+- macOS: DMG
 
-To learn more about Next.js, take a look at the following resources:
+These are the actual package formats from the current Electron config in [package.json](package.json).
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### Developer notes
+- The app starts the Electron shell and then launches the Next.js UI.
+- Notes and images are stored locally and loaded back into the app when reopening a note.
+- AI generation flow and browser automation live in the Electron layer.
+- The app prompt contract is defined in [prompt.md](prompt.md).
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+---
 
-## Deploy on Vercel
+## Contributing
+If you are helping with the project, keep the experience simple for users and update [Changelog.md](Changelog.md) whenever meaningful changes are made.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## License
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.

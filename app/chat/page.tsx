@@ -44,6 +44,51 @@ function formatElapsed(ms: number) {
   return `${seconds}s`;
 }
 
+function TypingGenerationText({ active, pageNumber }: { active: boolean; pageNumber: number }) {
+  const phrases = [
+    `Sketching page ${pageNumber}...`,
+    `Composing the layout...`,
+    `Polishing the story...`,
+    `Adding the final details...`,
+  ];
+  const [text, setText] = useState('');
+  const [phraseIndex, setPhraseIndex] = useState(0);
+
+  useEffect(() => {
+    if (!active) {
+      setText('');
+      return;
+    }
+
+    const currentPhrase = phrases[phraseIndex % phrases.length];
+    if (!currentPhrase) return;
+
+    let index = 0;
+    let timer: number | undefined;
+
+    const tick = () => {
+      index += 1;
+      setText(currentPhrase.slice(0, index));
+      if (index >= currentPhrase.length) {
+        window.clearTimeout(timer);
+        const next = window.setTimeout(() => {
+          setPhraseIndex((prev) => prev + 1);
+          setText('');
+        }, 650);
+        return () => window.clearTimeout(next);
+      }
+      timer = window.setTimeout(tick, 35);
+    };
+
+    tick();
+    return () => {
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [active, phraseIndex]);
+
+  return <span>{active ? text : 'Waiting for the next page...'}</span>;
+}
+
 function pickStatusForElapsed(ms: number, progress: string | null, fallbackIndex: number) {
   if (progress && progress.trim().length > 0) return progress;
   const bucket = Math.min(
@@ -75,6 +120,26 @@ type GeneratedPageImage = {
   filePath: string;
 };
 
+function GeneratedImageCard({ image, innerRef }: { image: GeneratedPageImage; innerRef?: (element: HTMLImageElement | null) => void }) {
+  const [loaded, setLoaded] = useState(false);
+
+  return (
+    <div className="overflow-hidden rounded-md border border-white/5 shadow-lg">
+      <img
+        ref={innerRef}
+        src={image.filePath}
+        alt={`Generated Page ${image.pageNumber}`}
+        loading="lazy"
+        onLoad={() => setLoaded(true)}
+        className={[
+          'block h-auto w-full transition-all duration-700 ease-out',
+          loaded ? 'scale-100 opacity-100 blur-0' : 'scale-[1.02] opacity-0 blur-xl',
+        ].join(' ')}
+      />
+    </div>
+  );
+}
+
 type ExportFormat = 'pdf' | 'png' | 'jpeg';
 
 export default function NewChatPage() {
@@ -93,11 +158,16 @@ export default function NewChatPage() {
   const [pageStartTimes, setPageStartTimes] = useState<Record<number, number>>({});
   const [failedPages, setFailedPages] = useState<Record<number, string>>({});
   const [nowMs, setTickNow] = useState<number>(() => Date.now());
-  
+  const pageTitle = assistantData?.topicName?.trim() || 'New Chat';
+
   const containerEndRef = useRef<HTMLDivElement | null>(null);
   const imageRefs = useRef<Record<number, HTMLImageElement | null>>({});
   const pageImagesRef = useRef<GeneratedPageImage[]>([]);
   const chatSessionRef = useRef<{ sessionId?: string; session?: AssistantData['chatSession']; chatUrl?: string }>({});
+
+  useEffect(() => {
+    document.title = pageTitle;
+  }, [pageTitle]);
 
   useEffect(() => {
     containerEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -373,7 +443,7 @@ export default function NewChatPage() {
             <span>Back</span>
           </button>
           <span className="text-slate-400 font-normal">/</span>
-          <span className="text-slate-200 font-semibold">New Chat</span>
+          <span className="text-slate-200 font-semibold">{pageTitle}</span>
         </div>
 
         <div className="flex items-center gap-1 -mr-2" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
@@ -593,9 +663,11 @@ export default function NewChatPage() {
 
                           <div className="space-y-2.5">
                             <div className="text-base font-semibold text-white drop-shadow-sm">
-                              {isCurrentlyBuilding
-                                ? `Painting page ${targetPageNum}…`
-                                : `Page ${targetPageNum} is waiting its turn`}
+                              {isCurrentlyBuilding ? (
+                                <TypingGenerationText active={isCurrentlyBuilding} pageNumber={targetPageNum} />
+                              ) : (
+                                `Page ${targetPageNum} is ready to render`
+                              )}
                             </div>
                             <div
                               className={`min-h-[22px] text-xs text-white/90 ${
@@ -603,8 +675,8 @@ export default function NewChatPage() {
                               }`}
                             >
                               {isCurrentlyBuilding
-                                ? statusForElapsed
-                                : 'Sipping a warm cup until it’s ready to go.'}
+                                ? 'Dressing the canvas with a fresh visual rhythm.'
+                                : 'Everything is lined up and waiting for the next warm pass.'}
                             </div>
                             {subTopic?.names?.[0] && (
                               <div className="pt-1 text-[11px] text-white/70 line-clamp-1">
@@ -612,23 +684,6 @@ export default function NewChatPage() {
                               </div>
                             )}
                           </div>
-
-                          {isCurrentlyBuilding && generationProgress && (
-                            <div className="w-80 max-w-full">
-                              <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/20 backdrop-blur-sm">
-                                <div
-                                  className="h-full rounded-full bg-gradient-to-r from-teal-300 via-cyan-200 to-fuchsia-300 transition-all duration-500"
-                                  style={{
-                                    width: /(\d+(?:\.\d+)?)%/.test(generationProgress)
-                                      ? `${Math.max(2, Math.min(100, Number((generationProgress.match(/(\d+(?:\.\d+)?)%/)?.[1]) ?? 25)))}%`
-                                      : '40%',
-                                    backgroundSize: '200% 100%',
-                                    animation: 'cozyGradientShift 4s ease-in-out infinite',
-                                  }}
-                                />
-                              </div>
-                            </div>
-                          )}
                         </div>
 
                         <div className="w-full flex items-end justify-between text-[11px] text-white/80">

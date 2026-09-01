@@ -42,3 +42,5 @@ next-env.d.ts
 
 #electron
 dist
+.exclude
+result.json

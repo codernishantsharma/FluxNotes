@@ -455,10 +455,22 @@
     var seen = {};
     var addInfo = function (info) {
       if (!info || (!info.imagePath && !info.fileId && !info.generationId)) return;
-      var key = (info.imagePath || "") + "|" + (info.fileId || "") + "|" + (info.generationId || "");
-      if (seen[key]) return;
-      seen[key] = true;
-      mergedImages.push(info);
+      var key = (info.imagePath || "").trim();
+      if (!key) {
+        key = (info.fileId || "") + "|" + (info.generationId || "");
+      }
+      if (!seen[key]) {
+        seen[key] = {};
+        mergedImages.push(seen[key]);
+      }
+      var current = seen[key];
+      for (var field in info) {
+        if (Object.prototype.hasOwnProperty.call(info, field)) {
+          if (info[field] != null && info[field] !== "" && (current[field] == null || current[field] === "") ) {
+            current[field] = info[field];
+          }
+        }
+      }
     };
     for (var ii = 0; ii < parsedImages.length; ii++) addInfo(parsedImages[ii]);
     for (var si2 = 0; si2 < sandboxImagePaths.length; si2++) {
@@ -743,21 +755,7 @@
       }
       var streamResult;
       try {
-      streamResult = await _parseSSEStream(res);
-      if (window.parent && typeof window.parent.postMessage === 'function') {
-        window.parent.postMessage({
-          type: 'FLUXNOTES_SAVE_RAW_RESULT',
-          sessionId: sessionId || 'default',
-          rawContent: streamResult.text,
-          conversationId: _conversationId
-        }, '*');
-        await window.electrolApi.saveRawResult({
-          sessionId: sessionId || 'default',
-          rawContent: res,
-          conversationId: _conversationId
-        });
-      }
-
+        streamResult = await _parseSSEStream(res);
       } finally {
         clearTimeout(retryTimeoutId);
       }
@@ -877,6 +875,11 @@
   }
 
   async function downloadSandboxImage(imagePath, messageId, sessionId) {
+    console.log("[FluxNotes ChatGPT] Starting sandbox image download:", {
+      imagePath: imagePath || null,
+      messageId: messageId || null,
+      sessionId: sessionId || null,
+    });
     if (sessionId) activateSession(sessionId);
     var conversationId = _conversationId;
     if (!conversationId) throw new Error("No active conversation");
@@ -979,7 +982,7 @@
       data = { base64: b64, mimeType: blobFromMeta.type || "image/png", size: bs.length };
     }
 
-    console.log("[FluxNotes ChatGPT] Downloaded sandbox image. Size:", data.size, "type:", data.mimeType, "file:", info ? info.file_name : null);
+    console.log("[FluxNotes ChatGPT] Downloaded sandbox image. Size:", data.size, "type:", data.mimeType, "file:", info ? info.file_name : null, "imagePath:", imagePath);
     return {
       base64: data.base64,
       mimeType: data.mimeType,
