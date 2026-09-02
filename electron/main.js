@@ -23,6 +23,7 @@ let pendingChatUrl = null;
 let activeChatSessionId = null;
 let activeChatSession = null;
 let isChatGptLoggedIn = false;
+let isGeminiSessionInitialized = false;
 
 function createChatSessionId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
@@ -31,13 +32,19 @@ function createChatSessionId() {
 
 
 let loginCheckInterval = null;
+let activeProvider = null;
+const PROVIDER_STORAGE_KEY = 'fluxnotes-ai-provider';
+const CHATGPT_URL = 'https://chatgpt.com/';
+const GEMINI_SIGN_IN_URL = 'https://gemini.google.com/signin';
 
 // Read the fluxnotes Engine script once on startup
 let chatGptEngineScript = "";
+let geminiEngineScript = "";
 try {
   chatGptEngineScript = fs.readFileSync(path.join(__dirname, 'chatgpt-engine.js'), 'utf8');
+  geminiEngineScript = fs.readFileSync(path.join(__dirname, 'gemini-engine.js'), 'utf8');
 } catch (err) {
-  console.error("WARNING: Could not load chatgpt-engine.js. Ensure it exists in the same directory.", err);
+  console.error("WARNING: Could not load an AI engine. Ensure both engine files exist in the same directory.", err);
 }
 
 function disableDevTools(window) {
@@ -73,9 +80,28 @@ function isChatGptUrl(url) {
   }
 }
 
+function isGeminiUrl(url) {
+  try {
+    return new URL(url).hostname === 'gemini.google.com';
+  } catch {
+    return false;
+  }
+}
+
+async function getSelectedProvider() {
+  if (!mainWindow || mainWindow.isDestroyed()) return null;
+
+  const provider = await mainWindow.webContents.executeJavaScript(
+    `window.localStorage.getItem(${JSON.stringify(PROVIDER_STORAGE_KEY)})`,
+  );
+  return provider === 'gemini' || provider === 'chatgpt' ? provider : null;
+}
+
 function isAuthProviderUrl(url) {
   try {
     const host = new URL(url).hostname.toLowerCase();
+    if (host === 'gemini.google.com') return false;
+
     const authHosts = [
       'accounts.google.com',
       'google.com',
@@ -174,7 +200,12 @@ function findJsonObjectEnd(text, startIndex) {
 }
 
 function extractJsonFromResponse(rawText) {
-  const text = rawText
+  const normalizedRawText = typeof rawText === 'string'
+    && rawText.includes('\\n')
+    && rawText.includes('\\"')
+    ? rawText.replace(/\\n/g, '\n').replace(/\\r/g, '\r').replace(/\\t/g, '\t').replace(/\\"/g, '"')
+    : rawText;
+  const text = normalizedRawText
     .replace(/<br\s*[\/]?>/gi, '\n')
     .replace(/<\/?[^>]+(>|$)/g, '')
     .replace(/&amp;/g, '&')
@@ -309,6 +340,71 @@ function escapeHtml(value) {
 }
 
 const RESULT_JSON_PATH = path.resolve(__dirname, '..', 'result.json');
+const RAW_JSON_PATH = path.resolve(__dirname, '..', 'raw.json');
+
+function extractGeminiImageLinks(rawText) {
+  if (typeof rawText !== 'string') return [];
+
+  const normalizedText = rawText
+    .replace(/\\\//g, '/')
+    .replace(/\\u0026/gi, '&')
+    .replace(/\\u003d/gi, '=');
+  const links = normalizedText.match(/https?:\/\/lh3\.googleusercontent\.com\/[^\s"'<>`\\)]+/gi) || [];
+
+  return [...new Set(links.map((link) => link.replace(/[.,;!?]+$/, '')))];
+}
+
+async function downloadGeminiImages(rawText) {
+  const links = extractGeminiImageLinks(rawText);
+  const downloadedImages = [];
+
+  for (const imageUrl of links) {
+    try {
+      const response = await fetch(imageUrl);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+      const contentType = response.headers.get('content-type') || 'image/png';
+      const imageData = Buffer.from(await response.arrayBuffer());
+      if (imageData.length === 0) throw new Error('Empty image response');
+
+      const fileId = createChatSessionId();
+      downloadedImages.push({
+        imagePath: imageUrl,
+        fileId,
+        generationId: fileId,
+        download: {
+          base64: imageData.toString('base64'),
+          mimeType: contentType.split(';')[0] || 'image/png',
+        },
+      });
+    } catch (error) {
+      console.error('[ELECTRON] Failed to download Gemini image:', imageUrl, error.message);
+    }
+  }
+
+  return downloadedImages;
+}
+
+async function writeRawResponse(responseData) {
+  try {
+    let formattedJson = null;
+    try {
+      const jsonText = extractJsonFromResponse(responseData.rawResponse);
+      formattedJson = JSON.parse(completeTruncatedJson(jsonText));
+    } catch {
+      // Preserve the raw response when it is not valid JSON.
+    }
+
+    await fs.promises.writeFile(
+      RAW_JSON_PATH,
+      JSON.stringify({ ...responseData, formattedJson }, null, 2),
+      'utf8',
+    );
+    console.log(`[raw.json] Saved latest raw response -> ${RAW_JSON_PATH}`);
+  } catch (error) {
+    console.error('[raw.json] Failed to save raw response:', error.message);
+  }
+}
 
 function appendToResultJson(entry) {
   if(!app.isPackaged) {
@@ -385,8 +481,10 @@ ipcMain.handle('start-new-chat', async () => {
   pendingChatUrl = null;
   activeChatSessionId = createChatSessionId();
   activeChatSession = { conversationId: null, parentMessageId: null };
+  isGeminiSessionInitialized = false;
   if (sendWorkerWindow && !sendWorkerWindow.isDestroyed()) {
-    await sendWorkerWindow.loadURL('https://chatgpt.com/');
+    const provider = await getSelectedProvider();
+    await sendWorkerWindow.loadURL(provider === 'gemini' ? GEMINI_SIGN_IN_URL : CHATGPT_URL);
   }
   return { sessionId: activeChatSessionId };
 });
@@ -403,6 +501,7 @@ ipcMain.handle('set-note-chat-session', (_, { chatUrl, sessionId, session }) => 
         conversationId: pendingChatUrl ? pendingChatUrl.match(/\/c\/([^/?#]+)/)?.[1] || null : null,
         parentMessageId: null,
       };
+  isGeminiSessionInitialized = true;
   return true;
 });
 
@@ -563,6 +662,24 @@ function startLoginCheckRoutine() {
   loginCheckInterval = setInterval(async () => {
     if (!sendWorkerWindow || sendWorkerWindow.isDestroyed()) return;
     try {
+      const provider = await getSelectedProvider();
+
+      if (!provider) {
+        if (sendWorkerWindow.isVisible()) sendWorkerWindow.hide();
+        if (mainWindow && !mainWindow.isVisible()) {
+          mainWindow.show();
+          mainWindow.focus();
+        }
+        return;
+      }
+
+      if (activeProvider && activeProvider !== provider) {
+        activeChatSessionId = null;
+        activeChatSession = null;
+        isGeminiSessionInitialized = false;
+      }
+      activeProvider = provider;
+
       const currentUrl = sendWorkerWindow.webContents.getURL();
       const onAuthProvider = isAuthProviderUrl(currentUrl);
 
@@ -571,7 +688,7 @@ function startLoginCheckRoutine() {
           console.log("[ELECTRON] Hiding main window during external auth flow.");
           mainWindow.hide();
         }
-        if (sendWorkerWindow && !sendWorkerWindow.isVisible()) {
+        if (!sendWorkerWindow.isVisible()) {
           console.log("[ELECTRON] Showing send worker window for auth provider login.");
           sendWorkerWindow.show();
           sendWorkerWindow.focus();
@@ -579,15 +696,28 @@ function startLoginCheckRoutine() {
         return;
       }
 
-      if (!currentUrl.includes('chatgpt.com')) {
+      const isOnProviderPage = provider === 'gemini'
+        ? isGeminiUrl(currentUrl)
+        : isChatGptUrl(currentUrl);
+
+      if (!isOnProviderPage) {
+        await sendWorkerWindow.loadURL(provider === 'gemini' ? GEMINI_SIGN_IN_URL : CHATGPT_URL);
         return;
       }
-      const hasLoginText = await sendWorkerWindow.webContents.executeJavaScript(`
-        (function() {
-          const bodyText = document.body ? document.body.innerText : "";
-          return bodyText.includes("Log in") || bodyText.includes("Sign up");
-        })();
-      `);
+
+      const hasLoginText = provider === 'gemini'
+        ? await sendWorkerWindow.webContents.executeJavaScript(`
+          (function() {
+            const bodyText = document.body ? document.body.innerText : "";
+            return /Meet Gemini, your personal AI assistant/i.test(bodyText);
+          })();
+        `)
+        : await sendWorkerWindow.webContents.executeJavaScript(`
+          (function() {
+            const bodyText = document.body ? document.body.innerText : "";
+            return bodyText.includes("Log in") || bodyText.includes("Sign up");
+          })();
+        `);
       isChatGptLoggedIn = !hasLoginText;
       if (hasLoginText) {
         if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
@@ -665,16 +795,30 @@ const createWindow = async () => {
         console.error("[ELECTRON] Failed to inject fluxnotes engine into sendWorker:", err);
       }
     }
+    if (currentUrl.includes('gemini.google.com') && geminiEngineScript) {
+      try {
+        await sendWorkerWindow.webContents.executeJavaScript(geminiEngineScript);
+        console.log("[ELECTRON] Gemini engine injected into sendWorker.");
+      } catch (err) {
+        console.error("[ELECTRON] Failed to inject Gemini engine into sendWorker:", err);
+      }
+    }
   });
 
   if (app.isPackaged) {
     await appServe(mainWindow);
-    mainWindow.loadURL("app://-");
+    await mainWindow.loadURL("app://-");
   } else {
-    mainWindow.loadURL("http://localhost:3000");
+    await mainWindow.loadURL("http://localhost:3000");
   }
 
-  await sendWorkerWindow.loadURL("https://chatgpt.com/");
+  const selectedProvider = await getSelectedProvider();
+  const workerUrl = selectedProvider === 'gemini'
+    ? GEMINI_SIGN_IN_URL
+    : selectedProvider === 'chatgpt'
+      ? CHATGPT_URL
+      : 'about:blank';
+  await sendWorkerWindow.loadURL(workerUrl);
 
   if (forceShowWorker) {
     mainWindow.show();
@@ -718,6 +862,7 @@ ipcMain.handle('fill-chatgpt-input', async (event, userText) => {
   }
   const sessionId = activeChatSessionId;
   try {
+    const provider = await getSelectedProvider();
     let promptContent = "";
     try {
       const promptPath = path.join(__dirname, '../prompt.md');
@@ -727,6 +872,43 @@ ipcMain.handle('fill-chatgpt-input', async (event, userText) => {
     } catch (error) {
       console.error("Failed to read prompt.md:", error);
     }
+    let result;
+    if (provider === 'gemini') {
+      const isEngineLoaded = await sendWorkerWindow.webContents.executeJavaScript(`typeof window.__fluxnotesGeminiUnified !== 'undefined'`);
+      if (!isEngineLoaded && geminiEngineScript) {
+        console.log("[ELECTRON] Gemini engine missing. Injecting now...");
+        await sendWorkerWindow.webContents.executeJavaScript(geminiEngineScript);
+      }
+
+      const geminiResult = await sendWorkerWindow.webContents.executeJavaScript(`
+        (async function() {
+          if (!window.__fluxnotesGeminiUnified) {
+            throw new Error("Gemini engine not loaded.");
+          }
+
+          const sysPrompt = ${JSON.stringify(promptContent)};
+          const usrText = ${JSON.stringify(userText)};
+          const sessionId = ${JSON.stringify(sessionId)};
+          ${isGeminiSessionInitialized ? '' : `await window.__fluxnotesGeminiUnified.send(sysPrompt, 'auto', null, sessionId);`}
+          const response = await window.__fluxnotesGeminiUnified.send(usrText, 'auto', null, sessionId);
+          return { rawText: String(response || ''), session: null };
+        })();
+      `);
+      isGeminiSessionInitialized = true;
+      const downloadedGeminiImages = await downloadGeminiImages(geminiResult?.rawText || '');
+
+      result = {
+        rawText: geminiResult?.rawText || '',
+        conversationId: null,
+        messageId: null,
+        session: null,
+        generationId: null,
+        fileId: null,
+        generatedImages: downloadedGeminiImages.map(({ download, ...image }) => image),
+        downloadedSandboxImages: downloadedGeminiImages,
+      };
+    } else {
+
     const isEngineLoaded = await sendWorkerWindow.webContents.executeJavaScript(`typeof window.__fluxnotesChatGPT !== 'undefined'`);
     if (!isEngineLoaded && chatGptEngineScript) {
       console.log("[ELECTRON] fluxnotes engine missing. Injecting now...");
@@ -736,7 +918,7 @@ ipcMain.handle('fill-chatgpt-input', async (event, userText) => {
     // The Electron process owns the session. The page never restores a session
     // from localStorage, so a new note cannot accidentally continue an old one.
     const session = activeChatSession;
-    const result = await sendWorkerWindow.webContents.executeJavaScript(`
+    result = await sendWorkerWindow.webContents.executeJavaScript(`
       (async function() {
         if (!window.__fluxnotesChatGPT) {
           throw new Error("fluxnotes engine not loaded.");
@@ -883,10 +1065,18 @@ ipcMain.handle('fill-chatgpt-input', async (event, userText) => {
         
       })();
     `);
+    }
 
     if (result) {
       const { rawText = "", conversationId, messageId, session, generationId, fileId, generatedImages, downloadedSandboxImages } = result;
       activeChatSession = session || activeChatSession;
+
+      await writeRawResponse({
+        provider: provider || 'chatgpt',
+        sessionId,
+        timestamp: new Date().toISOString(),
+        rawResponse: rawText,
+      });
 
       appendToResultJson({
         sessionId: sessionId || null,

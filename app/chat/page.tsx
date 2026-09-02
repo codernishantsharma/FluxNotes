@@ -3,6 +3,7 @@
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import { ChatGptMark, GeminiMark } from '../onboarding/page';
 
 const isStartOrContinue = (text: string) => {
   const lower = text.trim().toLowerCase();
@@ -142,6 +143,8 @@ function GeneratedImageCard({ image, innerRef }: { image: GeneratedPageImage; in
 
 type ExportFormat = 'pdf' | 'png' | 'jpeg';
 
+const PROVIDER_STORAGE_KEY = 'fluxnotes-ai-provider';
+
 export default function NewChatPage() {
   const router = useRouter();
   const [inputText, setInputText] = useState('');
@@ -158,16 +161,26 @@ export default function NewChatPage() {
   const [pageStartTimes, setPageStartTimes] = useState<Record<number, number>>({});
   const [failedPages, setFailedPages] = useState<Record<number, string>>({});
   const [nowMs, setTickNow] = useState<number>(() => Date.now());
+  const [provider, setProvider] = useState<'chatgpt' | 'gemini'>('chatgpt');
   const pageTitle = assistantData?.topicName?.trim() || 'New Chat';
 
   const containerEndRef = useRef<HTMLDivElement | null>(null);
   const imageRefs = useRef<Record<number, HTMLImageElement | null>>({});
   const pageImagesRef = useRef<GeneratedPageImage[]>([]);
   const chatSessionRef = useRef<{ sessionId?: string; session?: AssistantData['chatSession']; chatUrl?: string }>({});
+  const startedNewChatRef = useRef(false);
 
   useEffect(() => {
     document.title = pageTitle;
   }, [pageTitle]);
+
+  useEffect(() => {
+    const savedProvider = window.localStorage.getItem(PROVIDER_STORAGE_KEY);
+    if (savedProvider === 'chatgpt' || savedProvider === 'gemini') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setProvider(savedProvider);
+    }
+  }, []);
 
   useEffect(() => {
     containerEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -213,6 +226,8 @@ export default function NewChatPage() {
   useEffect(() => {
     const noteId = new URLSearchParams(window.location.search).get('id');
     if (!noteId) {
+      if (startedNewChatRef.current) return;
+      startedNewChatRef.current = true;
       void window.electronAPI?.startNewChat?.().then((chat) => {
         chatSessionRef.current = { sessionId: chat?.sessionId };
       });
@@ -403,6 +418,12 @@ export default function NewChatPage() {
   const maximizeWindow = () => window.electronAPI?.maximize();
   const closeWindow = () => window.electronAPI?.close();
 
+  const changeProvider = (nextProvider: 'chatgpt' | 'gemini') => {
+    if (nextProvider === provider) return;
+    window.localStorage.setItem(PROVIDER_STORAGE_KEY, nextProvider);
+    setProvider(nextProvider);
+  };
+
   const exportNotes = async () => {
     if (isExporting || pageImages.length === 0 || !window.electronAPI?.exportNote) return;
 
@@ -444,6 +465,15 @@ export default function NewChatPage() {
           </button>
           <span className="text-slate-400 font-normal">/</span>
           <span className="text-slate-200 font-semibold">{pageTitle}</span>
+          <div className="ml-2 flex items-center gap-1 rounded-lg border border-white/10 bg-white/5 p-0.5" aria-label="AI provider">
+            <button type="button" onClick={() => changeProvider('chatgpt')} aria-label="Use ChatGPT" aria-pressed={provider === 'chatgpt'} className={`flex h-7 w-7 items-center justify-center rounded-md transition ${provider === 'chatgpt' ? 'bg-teal-300/20 text-teal-200' : 'text-slate-500 hover:text-white'}`}>
+              <ChatGptMark />
+            </button>
+            <button type="button" onClick={() => changeProvider('gemini')} aria-label="Use Gemini" aria-pressed={provider === 'gemini'} className={`flex h-7 w-7 items-center justify-center rounded-md transition ${provider === 'gemini' ? 'bg-blue-400/20 text-blue-200' : 'text-slate-500 hover:text-white'}`}>
+              <GeminiMark />
+            </button>
+            <span className="mr-1 text-[8px] font-semibold tracking-wide text-blue-300/80">DEV</span>
+          </div>
         </div>
 
         <div className="flex items-center gap-1 -mr-2" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>

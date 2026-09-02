@@ -3,6 +3,7 @@
 
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
+import { ChatGptMark, GeminiMark } from './onboarding/page';
 
 type SubTopic = {
   names: string[];
@@ -19,6 +20,8 @@ type NoteItem = {
   pinned?: boolean;
 };
 
+const PROVIDER_STORAGE_KEY = 'fluxnotes-ai-provider';
+
 const toImageSource = (imagePath: string) => (
   imagePath.startsWith('local://') ? imagePath : `local://${encodeURI(imagePath.replace(/\\/g, '/'))}`
 );
@@ -26,12 +29,26 @@ const toImageSource = (imagePath: string) => (
 export default function DashboardPage() {
   const [notes, setNotes] = useState<NoteItem[]>([]);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [isCheckingOnboarding, setIsCheckingOnboarding] = useState(true);
+  const [provider, setProvider] = useState<'chatgpt' | 'gemini'>('chatgpt');
   
   // Auto-updater states
   const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'downloading' | 'ready'>('idle');
   const [downloadProgress, setDownloadProgress] = useState<number>(0);
 
   const router = useRouter();
+
+  useEffect(() => {
+    const savedProvider = window.localStorage.getItem(PROVIDER_STORAGE_KEY);
+    if (savedProvider === 'chatgpt' || savedProvider === 'gemini') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setProvider(savedProvider);
+      setIsCheckingOnboarding(false);
+      return;
+    }
+
+    router.replace('/onboarding');
+  }, [router]);
 
   const sortedNotes = useMemo(() => {
     return [...notes].sort((first, second) => (
@@ -101,6 +118,16 @@ export default function DashboardPage() {
   const maximizeWindow = () => window.electronAPI?.maximize();
   const closeWindow = () => window.electronAPI?.close();
 
+  const changeProvider = (nextProvider: 'chatgpt' | 'gemini') => {
+    if (nextProvider === provider) return;
+    window.localStorage.setItem(PROVIDER_STORAGE_KEY, nextProvider);
+    setProvider(nextProvider);
+  };
+
+  if (isCheckingOnboarding) {
+    return <div className="min-h-dvh bg-black" />;
+  }
+
   const renameNote = async (note: NoteItem) => {
     const topicName = window.prompt('Enter a new note name:', note.topicName || 'Untitled Topic');
     if (topicName === null || !topicName.trim()) return;
@@ -136,6 +163,15 @@ export default function DashboardPage() {
       >
         <div className="flex items-center gap-2 font-medium text-white" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
           <span className="text-slate-200 font-semibold pl-1">FluxNotes</span>
+          <div className="ml-3 flex items-center gap-1 rounded-lg border border-white/10 bg-white/5 p-0.5" aria-label="AI provider">
+            <button type="button" onClick={() => changeProvider('chatgpt')} aria-label="Use ChatGPT" aria-pressed={provider === 'chatgpt'} className={`flex h-7 w-7 items-center justify-center rounded-md transition ${provider === 'chatgpt' ? 'bg-teal-300/20 text-teal-200' : 'text-slate-500 hover:text-white'}`}>
+              <ChatGptMark />
+            </button>
+            <button type="button" onClick={() => changeProvider('gemini')} aria-label="Use Gemini" aria-pressed={provider === 'gemini'} className={`flex h-7 w-7 items-center justify-center rounded-md transition ${provider === 'gemini' ? 'bg-blue-400/20 text-blue-200' : 'text-slate-500 hover:text-white'}`}>
+              <GeminiMark />
+            </button>
+            <span className="mr-1 text-[8px] font-semibold tracking-wide text-blue-300/80">DEV</span>
+          </div>
           
           {/* Updater status indicator / trigger button */}
           <button 
