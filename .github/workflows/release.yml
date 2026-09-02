@@ -81,7 +81,6 @@ jobs:
       - name: Import GPG Key
         run: |
           echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
-          echo "$(gpg --list-secret-keys --with-colons | grep sec | cut -d':' -f5):6:" | gpg --import-ownertrust
 
       - name: Download all workflow artifacts
         uses: actions/download-artifact@v4
@@ -116,8 +115,8 @@ jobs:
           git rm -rf .
           cp -r repo/* .
           
-          # Sets your custom domain for GitHub Pages (Change to your actual domain)
-          echo "packages.yourdomain.com" > CNAME
+          # Sets custom domain for GitHub Pages
+          echo "repo.fluxnotes.nishantapps.in" > CNAME
           
           # Ensures public.key is carried over if you have it in your root folder
           [ -f ../public.key ] && cp ../public.key ./public.key || true
