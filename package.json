@@ -85,9 +85,10 @@
     "start": "next start",
     "lint": "eslint",
     "build:next": "next build",
-    "build:electron": "electron-builder",
-    "build:all": "npm run build:next && electron-builder -mwl",
-    "build:winux": "next build && electron-builder --win --linux"
+    "build:electron-ts": "tsc -p electron/tsconfig.json",
+    "build:electron": "pnpm build:electron-ts && electron-builder",
+    "build:all": "pnpm build:next && pnpm build:electron-ts && electron-builder -mwl",
+    "build:winux": "pnpm build:next && pnpm build:electron-ts && electron-builder --win --linux"
   },
   "author": {
     "name": "Nishant",
