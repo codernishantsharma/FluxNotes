@@ -8,6 +8,28 @@
     var TOKEN_TTL = 300000;
     var _tokens = null;
     var _tokensFetchedAt = 0;
+    var _requestSequence = 0;
+
+    function _fetch(url, options) {
+        var requestId = ++_requestSequence;
+        var requestOptions = options || {};
+        var headers = requestOptions.headers || {};
+        var safeHeaders = {};
+        Object.keys(headers).forEach(function (key) {
+            safeHeaders[key] = /^(at|authorization|cookie|x-goog-upload-url)$/i.test(key) ? '[redacted]' : headers[key];
+        });
+        var body = requestOptions.body;
+        var bodyLength = typeof body === 'string' ? body.length : (body && body.byteLength) || 0;
+        var safeUrl = String(url).replace(/([?&](?:at|access_token|authuser|token|key)=)[^&]+/gi, '$1[redacted]');
+        console.log('[fluxnotes Gemini API] Request #' + requestId, {
+            method: requestOptions.method || 'GET',
+            url: safeUrl,
+            headers: safeHeaders,
+            bodyLength: bodyLength
+        });
+
+        return fetch(url, options);
+    }
 
     function generateUuid() {
         return (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
@@ -196,7 +218,7 @@
         var controller = new AbortController();
         var tid = setTimeout(function () { controller.abort(); }, 30000);
 
-        var res = await fetch('/faq', { credentials: 'include', signal: controller.signal });
+        var res = await _fetch('/faq', { credentials: 'include', signal: controller.signal });
         clearTimeout(tid);
 
         if (!res.ok) throw new Error('Gemini page fetch failed (' + res.status + ')');
@@ -396,25 +418,20 @@
             'X-Goog-Upload-Command': 'start',
             'Content-Type': 'application/x-www-form-urlencoded;charset=utf-8'
         };
-
-        var initRes = await fetch('https://push.clients6.google.com/upload/', {
+        var initRes = await _fetch('https://push.clients6.google.com/upload/', {
             method: 'POST',
             headers: initHeaders,
             body: 'File name: ' + filename
         });
-
         if (!initRes.ok) {
             var errText = await initRes.text();
             throw new Error('Scotty upload initialization failed (' + initRes.status + '): ' + errText);
         }
-
         var uploadUrl = initRes.headers.get('x-goog-upload-url');
         if (!uploadUrl) {
             throw new Error('Upload Session URL not returned in headers');
         }
-
         console.log('[fluxnotes Gemini API] Resumable session created. Transferring binary bytes...');
-
         var uploadHeaders = {
             'Push-ID': pushId,
             'X-Tenant-Id': 'bard-storage',
@@ -424,23 +441,19 @@
             'Content-Type': 'application/x-www-form-urlencoded;charset=utf-8',
             'Content-Length': size.toString()
         };
-
-        var finalRes = await fetch(uploadUrl, {
+        var finalRes = await _fetch(uploadUrl, {
             method: 'POST',
             headers: uploadHeaders,
             body: bytes
         });
-
         if (!finalRes.ok) {
             var errText = await finalRes.text();
             throw new Error('Scotty upload finalization failed (' + finalRes.status + '): ' + errText);
         }
-
         var token = (await finalRes.text()).trim();
         console.log('[fluxnotes Gemini API] Upload successful! Token retrieved:', token);
         return token;
     }
-
     async function _processStreamResponse(res) {
         var reader = res.body.getReader();
         var decoder = new TextDecoder();
@@ -453,24 +466,12 @@
                 if (chunk.done) break;
                 var chunkStr = decoder.decode(chunk.value, { stream: true });
                 rawText += chunkStr;
-                var updateText = window.__fluxnotesGeminiStream.response || '';
-                if (chunkStr.indexOf('\n') !== -1) {
-                    try {
-                        var parsed = _parseResponse(rawText, false);
-                        if (parsed) {
-                            window.__fluxnotesGeminiStream.response = parsed;
-                            updateText = parsed;
-                        }
-                    } catch (e) {
-                        updateText = 'error: ' + e.message;
-                    }
-                }
                 var _updates = window.__fluxnotesGeminiStream.updates;
                 _updates.push({
                     time: Date.now(),
                     chunkLength: chunk.value.length,
-                    parsedLength: updateText.length,
-                    text: updateText.substring(0, 30)
+                    parsedLength: 0,
+                    text: ''
                 });
                 if (_updates.length > 50) _updates.shift();
             }
@@ -621,7 +622,7 @@
             var controller = new AbortController();
             var timeoutId = setTimeout(function () { controller.abort(); }, TIMEOUT);
 
-            var res = await fetch(url, {
+            var res = await _fetch(url, {
                 method: 'POST',
                 credentials: 'include',
                 headers: headers,
@@ -656,7 +657,7 @@
                 var retryController = new AbortController();
                 var retryTimeoutId = setTimeout(function () { retryController.abort(); }, TIMEOUT);
 
-                res = await fetch(retryUrl, {
+                res = await _fetch(retryUrl, {
                     method: 'POST',
                     credentials: 'include',
                     headers: retryHeaders,
@@ -681,6 +682,7 @@
                 }
 
                 var result;
+                console.log(res.body)
                 try {
                     result = await _processStreamResponse(res);
                 } finally {

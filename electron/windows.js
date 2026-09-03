@@ -81,6 +81,8 @@ function isGeminiUrl(url) {
 async function getSelectedProvider() {
     if (!mainWindow || mainWindow.isDestroyed())
         return null;
+    if (electron_1.app.isPackaged)
+        return 'chatgpt';
     const provider = await mainWindow.webContents.executeJavaScript(`window.localStorage.getItem(${JSON.stringify(exports.PROVIDER_STORAGE_KEY)})`);
     return provider === 'gemini' || provider === 'chatgpt' ? provider : null;
 }

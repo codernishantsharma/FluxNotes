@@ -70,6 +70,7 @@ export function isGeminiUrl(url: string): boolean {
 
 export async function getSelectedProvider(): Promise<string | null> {
   if (!mainWindow || mainWindow.isDestroyed()) return null;
+  if (app.isPackaged) return 'chatgpt';
 
   const provider = await mainWindow.webContents.executeJavaScript(
     `window.localStorage.getItem(${JSON.stringify(PROVIDER_STORAGE_KEY)})`,

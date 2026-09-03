@@ -27,22 +27,34 @@ async function processAiPrompt(workerWindow, mainWindow, userText, provider, act
     let result = null;
     if (provider === 'gemini') {
         await (0, gemini_1.injectGeminiEngineIfNeeded)(workerWindow);
+      const geminiPromptContent = promptContent.replace(/### Your Image Response[\s\S]*?(?=### Info On Image Generation)/, '');
+      const isGeminiImageCommand = (() => {
+        try {
+          const parsed = JSON.parse(userText);
+          return parsed.status === 'start' || parsed.status === 'continue';
+        }
+        catch {
+          return /["']?status["']?\s*:\s*["'](?:start|continue)["']/i.test(userText);
+        }
+      })();
         const geminiResult = await workerWindow.webContents.executeJavaScript(`
       (async function() {
         if (!window.__fluxnotesGeminiUnified) {
           throw new Error("Gemini engine not loaded.");
         }
 
-        const sysPrompt = ${JSON.stringify(promptContent)};
+        const sysPrompt = ${JSON.stringify(geminiPromptContent)};
         const usrText = ${JSON.stringify(userText)};
         const sessionId = ${JSON.stringify(sessionId)};
-        ${geminiInitialized ? '' : `await window.__fluxnotesGeminiUnified.send(sysPrompt, 'auto', null, sessionId);`}
-        const response = await window.__fluxnotesGeminiUnified.send(usrText, 'auto', null, sessionId);
+        ${geminiInitialized ? '' : `if (sysPrompt.trim()) await window.__fluxnotesGeminiUnified.send(sysPrompt, '3.1-pro', null, sessionId);`}
+        const response = await window.__fluxnotesGeminiUnified.send(usrText, '3.1-pro', null, sessionId);
         return { rawText: String(response || ''), session: null };
       })();
     `);
         geminiInitialized = true;
-        const downloadedGeminiImages = await (0, gemini_1.downloadGeminiImages)(geminiResult?.rawText || '');
+        const downloadedGeminiImages = isGeminiImageCommand
+          ? await (0, gemini_1.downloadGeminiImages)(geminiResult?.rawText || '')
+          : [];
         result = {
             rawText: geminiResult?.rawText || '',
             conversationId: null,

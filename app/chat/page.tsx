@@ -115,6 +115,7 @@ type GeneratedPageImage = {
 type ExportFormat = 'pdf' | 'png' | 'jpeg';
 
 const PROVIDER_STORAGE_KEY = 'fluxnotes-ai-provider';
+const isProductionBuild = process.env.NODE_ENV === 'production';
 
 export default function NewChatPage() {
   const router = useRouter();
@@ -147,7 +148,7 @@ export default function NewChatPage() {
 
   useEffect(() => {
     const savedProvider = window.localStorage.getItem(PROVIDER_STORAGE_KEY);
-    if (savedProvider === 'chatgpt' || savedProvider === 'gemini') {
+    if (savedProvider === 'chatgpt' || (savedProvider === 'gemini' && !isProductionBuild)) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setProvider(savedProvider);
     }
@@ -390,6 +391,7 @@ export default function NewChatPage() {
   const closeWindow = () => window.electronAPI?.close();
 
   const changeProvider = (nextProvider: 'chatgpt' | 'gemini') => {
+    if (nextProvider === 'gemini' && isProductionBuild) return;
     if (nextProvider === provider) return;
     window.localStorage.setItem(PROVIDER_STORAGE_KEY, nextProvider);
     setProvider(nextProvider);
@@ -440,10 +442,12 @@ export default function NewChatPage() {
             <button type="button" onClick={() => changeProvider('chatgpt')} aria-label="Use ChatGPT" aria-pressed={provider === 'chatgpt'} className={`flex h-7 w-7 items-center justify-center rounded-md transition ${provider === 'chatgpt' ? 'bg-teal-300/20 text-teal-200' : 'text-slate-500 hover:text-white'}`}>
               <ChatGptMark />
             </button>
-            <button type="button" onClick={() => changeProvider('gemini')} aria-label="Use Gemini" aria-pressed={provider === 'gemini'} className={`flex h-7 w-7 items-center justify-center rounded-md transition ${provider === 'gemini' ? 'bg-blue-400/20 text-blue-200' : 'text-slate-500 hover:text-white'}`}>
-              <GeminiMark />
-            </button>
-            <span className="mr-1 text-[8px] font-semibold tracking-wide text-blue-300/80">DEV</span>
+            {!isProductionBuild && <>
+              <button type="button" onClick={() => changeProvider('gemini')} aria-label="Use Gemini" aria-pressed={provider === 'gemini'} className={`flex h-7 w-7 items-center justify-center rounded-md transition ${provider === 'gemini' ? 'bg-blue-400/20 text-blue-200' : 'text-slate-500 hover:text-white'}`}>
+                <GeminiMark />
+              </button>
+              <span className="mr-1 text-[8px] font-semibold tracking-wide text-blue-300/80">DEV</span>
+            </>}
           </div>
         </div>
 

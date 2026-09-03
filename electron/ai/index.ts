@@ -39,6 +39,18 @@ export async function processAiPrompt(
 
   if (provider === 'gemini') {
     await injectGeminiEngineIfNeeded(workerWindow);
+    const geminiPromptContent = promptContent.replace(
+      /### Your Image Response[\s\S]*?(?=### Info On Image Generation)/,
+      '',
+    );
+    const isGeminiImageCommand = (() => {
+      try {
+        const parsed = JSON.parse(userText) as { status?: unknown };
+        return parsed.status === 'start' || parsed.status === 'continue';
+      } catch {
+        return /["']?status["']?\s*:\s*["'](?:start|continue)["']/i.test(userText);
+      }
+    })();
 
     const geminiResult = await workerWindow.webContents.executeJavaScript(`
       (async function() {
@@ -46,16 +58,18 @@ export async function processAiPrompt(
           throw new Error("Gemini engine not loaded.");
         }
 
-        const sysPrompt = ${JSON.stringify(promptContent)};
+        const sysPrompt = ${JSON.stringify(geminiPromptContent)};
         const usrText = ${JSON.stringify(userText)};
         const sessionId = ${JSON.stringify(sessionId)};
-        ${geminiInitialized ? '' : `await window.__fluxnotesGeminiUnified.send(sysPrompt, 'auto', null, sessionId);`}
-        const response = await window.__fluxnotesGeminiUnified.send(usrText, 'auto', null, sessionId);
+        ${geminiInitialized ? '' : `if (sysPrompt.trim()) await window.__fluxnotesGeminiUnified.send(sysPrompt, '3.1-pro', null, sessionId);`}
+        const response = await window.__fluxnotesGeminiUnified.send(usrText, '3.1-pro', null, sessionId);
         return { rawText: String(response || ''), session: null };
       })();
     `);
     geminiInitialized = true;
-    const downloadedGeminiImages = await downloadGeminiImages(geminiResult?.rawText || '');
+    const downloadedGeminiImages = isGeminiImageCommand
+      ? await downloadGeminiImages(geminiResult?.rawText || '')
+      : [];
 
     result = {
       rawText: geminiResult?.rawText || '',

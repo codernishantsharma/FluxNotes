@@ -30,8 +30,11 @@ function extractGeminiImageLinks(rawText) {
         .replace(/\\\//g, '/')
         .replace(/\\u0026/gi, '&')
         .replace(/\\u003d/gi, '=');
-    const links = normalizedText.match(/https?:\/\/lh3\.googleusercontent\.com\/[^\s"'<>`\\)]+/gi) || [];
-    return [...new Set(links.map((link) => link.replace(/[.,;!?]+$/, '')))];
+    const firstLink = normalizedText.match(/https?:\/\/lh3\.googleusercontent\.com\/[^\s"'<>`\\)]+/i)?.[0];
+    const cleanedLink = firstLink ? firstLink.replace(/[.,;!?]+$/, '') : '';
+    if (cleanedLink)
+        console.log('[ELECTRON] Gemini image link selected:', cleanedLink);
+    return cleanedLink ? [cleanedLink] : [];
 }
 async function downloadGeminiImages(rawText) {
     const links = extractGeminiImageLinks(rawText);

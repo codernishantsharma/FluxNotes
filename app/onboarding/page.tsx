@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 type Provider = 'chatgpt' | 'gemini';
 
 const PROVIDER_STORAGE_KEY = 'fluxnotes-ai-provider';
+const isProductionBuild = process.env.NODE_ENV === 'production';
 
 export function ChatGptMark() {
   return (
@@ -26,7 +27,7 @@ export default function OnboardingPage() {
   const [provider, setProvider] = useState<Provider>('chatgpt');
 
   const finishOnboarding = () => {
-    window.localStorage.setItem(PROVIDER_STORAGE_KEY, provider);
+    window.localStorage.setItem(PROVIDER_STORAGE_KEY, isProductionBuild ? 'chatgpt' : provider);
     router.replace('/');
   };
 
@@ -80,7 +81,7 @@ export default function OnboardingPage() {
                 {([
                   { id: 'chatgpt', name: 'ChatGPT', detail: '', icon: <ChatGptMark /> },
                   { id: 'gemini', name: 'Gemini', detail: '', icon: <GeminiMark /> },
-                ] as const).map((option) => {
+                ] as const).filter((option) => !isProductionBuild || option.id !== 'gemini').map((option) => {
                   const isSelected = provider === option.id;
                   return (
                     <button
