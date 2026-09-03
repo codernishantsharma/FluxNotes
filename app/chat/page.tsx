@@ -46,20 +46,20 @@ function formatElapsed(ms: number) {
 }
 
 function TypingGenerationText({ active, pageNumber }: { active: boolean; pageNumber: number }) {
-  const phrases = [
-    `Sketching page ${pageNumber}...`,
-    `Composing the layout...`,
-    `Polishing the story...`,
-    `Adding the final details...`,
-  ];
   const [text, setText] = useState('');
   const [phraseIndex, setPhraseIndex] = useState(0);
 
   useEffect(() => {
     if (!active) {
-      setText('');
       return;
     }
+
+    const phrases = [
+      `Sketching page ${pageNumber}...`,
+      `Composing the layout...`,
+      `Polishing the story...`,
+      `Adding the final details...`,
+    ];
 
     const currentPhrase = phrases[phraseIndex % phrases.length];
     if (!currentPhrase) return;
@@ -85,19 +85,10 @@ function TypingGenerationText({ active, pageNumber }: { active: boolean; pageNum
     return () => {
       if (timer) window.clearTimeout(timer);
     };
-  }, [active, phraseIndex]);
+  }, [active, phraseIndex, pageNumber]);
 
   return <span>{active ? text : 'Waiting for the next page...'}</span>;
 }
-
-function pickStatusForElapsed(ms: number, progress: string | null, fallbackIndex: number) {
-  if (progress && progress.trim().length > 0) return progress;
-  const bucket = Math.min(
-    COZY_GENERATION_STATUSES.length - 1,
-    Math.floor(fallbackIndex % COZY_GENERATION_STATUSES.length),
-  );
-  return COZY_GENERATION_STATUSES[bucket] ?? COZY_GENERATION_STATUSES[0];
-};
 
 type SubTopic = {
   names: string[];
@@ -120,26 +111,6 @@ type GeneratedPageImage = {
   pageNumber: number;
   filePath: string;
 };
-
-function GeneratedImageCard({ image, innerRef }: { image: GeneratedPageImage; innerRef?: (element: HTMLImageElement | null) => void }) {
-  const [loaded, setLoaded] = useState(false);
-
-  return (
-    <div className="overflow-hidden rounded-md border border-white/5 shadow-lg">
-      <img
-        ref={innerRef}
-        src={image.filePath}
-        alt={`Generated Page ${image.pageNumber}`}
-        loading="lazy"
-        onLoad={() => setLoaded(true)}
-        className={[
-          'block h-auto w-full transition-all duration-700 ease-out',
-          loaded ? 'scale-100 opacity-100 blur-0' : 'scale-[1.02] opacity-0 blur-xl',
-        ].join(' ')}
-      />
-    </div>
-  );
-}
 
 type ExportFormat = 'pdf' | 'png' | 'jpeg';
 
@@ -557,10 +528,6 @@ export default function NewChatPage() {
                   const startTs = pageStartTimes[targetPageNum];
                   const elapsedMs = startTs ? nowMs - startTs : 0;
                   const failedMsg = failedPages[targetPageNum];
-                  const statusBucket = Math.max(0, Math.floor((elapsedMs || 0) / 3500) + idx);
-                  const displayStatus = failedMsg
-                    ? 'Failed'
-                    : pickStatusForElapsed(elapsedMs, isCurrentlyBuilding ? generationProgress : null, statusBucket);
 
                   if (existingImage) {
                     return (
@@ -605,8 +572,6 @@ export default function NewChatPage() {
                       </div>
                     );
                   }
-
-                  const statusForElapsed = displayStatus;
 
                   return (
                     <div 
