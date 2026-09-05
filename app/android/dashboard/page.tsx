@@ -3,7 +3,7 @@
 /* eslint-disable @next/next/no-img-element */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { getMobileValue, mobileKeys } from '../mobile-storage';
+import { downloadNoteImages, getMobileValue, mobileKeys, toHttpApiUrl } from '../mobile-storage';
 import { sendMobileCommand } from '../mobile-api';
 
 type NoteItem = {
@@ -18,8 +18,7 @@ type NoteItem = {
 function toImageSource(imagePath: string, hostUrl: string): string {
   if (imagePath.startsWith('local://') || imagePath.startsWith('data:')) return imagePath;
   if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) return imagePath;
-  const host = hostUrl.replace(/^wss?:\/\//, (scheme) => scheme === 'wss://' ? 'https://' : 'http://').replace(/\/ws\/?$/, '');
-  return `${host}${imagePath.startsWith('/') ? imagePath : `/${imagePath}`}`;
+  return toHttpApiUrl(hostUrl, imagePath);
 }
 
 export default function AndroidDashboardPage() {
@@ -50,7 +49,12 @@ export default function AndroidDashboardPage() {
     try {
       setConnectionStatus('Loading notes');
       const response = await sendMobileCommand<{ notes?: unknown[] }>({ type: 'list_notes' });
-      setNotes(Array.isArray(response.notes) ? response.notes as NoteItem[] : []);
+      const receivedNotes = Array.isArray(response.notes) ? response.notes as NoteItem[] : [];
+      const downloadedNotes = await Promise.all(receivedNotes.map(async (note) => ({
+        ...note,
+        images: await downloadNoteImages(note.images, hostUrl, note.topicId),
+      })));
+      setNotes(downloadedNotes);
       setConnectionStatus('Connected');
     } catch (error) {
       console.error('Failed to load notes from host:', error);

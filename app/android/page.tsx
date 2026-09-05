@@ -32,7 +32,9 @@ export default function AndroidEntryPage() {
       const payload = JSON.parse(rawValue) as { host?: unknown; authToken?: unknown };
       const host = typeof payload.host === 'string' ? payload.host.trim().replace(/\/$/, '') : '';
       const authToken = typeof payload.authToken === 'string' ? payload.authToken.trim() : '';
-      if (!host || !authToken || !/^wss?:\/\//.test(host) || !host.endsWith('/ws')) {
+      const validWebSocketHost = /^wss?:\/\//.test(host) && host.endsWith('/ws/api');
+      const validHttpApiHost = /^https?:\/\//.test(host) && host.endsWith('/api');
+      if (!host || !authToken || (!validWebSocketHost && !validHttpApiHost)) {
         throw new Error('This is not a valid FluxNotes host QR code.');
       }
       await setMobileValue(mobileKeys.hostUrl, host);

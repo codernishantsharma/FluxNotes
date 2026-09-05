@@ -55,7 +55,7 @@ async function startNgrok() {
     if (!publicUrl)
         throw new Error('Ngrok returned no public URL.');
     console.log(`[ngrok] Forwarding ${publicUrl} to http://${host}:${port}`);
-    const websocketUrl = publicUrl.replace(/^https?:\/\//, 'wss://').replace(/\/$/, '') + '/ws';
+    const websocketUrl = publicUrl.replace(/^https?:\/\//, 'wss://').replace(/\/$/, '') + '/ws/api';
     console.log(`[ngrok] Mobile WebSocket endpoint: ${websocketUrl}`);
 }
 async function getNgrokSettings() {

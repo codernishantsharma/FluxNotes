@@ -62,13 +62,13 @@ export default function AndroidSettingsPage() {
               <input
                 value={hostUrl}
                 onChange={(event) => setHostUrl(event.target.value)}
-                placeholder="wss://your-domain.ngrok.app/ws"
+                placeholder="https://your-domain.ngrok.app/api"
                 inputMode="url"
                 autoCapitalize="none"
                 autoCorrect="off"
                 className="mt-2 h-12 w-full rounded-2xl border border-white/10 bg-black/20 px-4 font-mono text-xs text-white outline-none transition placeholder:text-slate-700 focus:border-teal-300/60"
               />
-              <span className="mt-2 block text-xs text-slate-600">Include the <code className="text-slate-400">/ws</code> path.</span>
+              <span className="mt-2 block text-xs text-slate-600">Use the HTTPS API URL ending in <code className="text-slate-400">/api</code>.</span>
             </label>
 
             <label className="block">

@@ -3,7 +3,7 @@
 /* eslint-disable @next/next/no-img-element */
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { getMobileDeviceInfo, getMobileValue, mobileKeys, setMobileValue } from '../mobile-storage';
+import { downloadNoteImages, getMobileDeviceInfo, getMobileValue, mobileKeys, setMobileValue, toWebSocketUrl } from '../mobile-storage';
 
 type NoteItem = {
   topicId: string;
@@ -16,8 +16,10 @@ type NoteItem = {
 
 function imageSource(imagePath: string, hostUrl: string): string {
   if (imagePath.startsWith('http://') || imagePath.startsWith('https://') || imagePath.startsWith('data:')) return imagePath;
-  const host = hostUrl.replace(/^wss?:\/\//, (scheme) => scheme === 'wss://' ? 'https://' : 'http://').replace(/\/ws\/?$/, '');
-  return `${host}${imagePath.startsWith('/') ? imagePath : `/${imagePath}`}`;
+  const url = new URL(hostUrl);
+  url.protocol = url.protocol === 'wss:' ? 'https:' : 'http:';
+  url.pathname = imagePath.startsWith('/api/') ? imagePath : `/api${imagePath.startsWith('/') ? imagePath : `/${imagePath}`}`;
+  return url.toString();
 }
 
 export default function AndroidNoteViewPage() {
@@ -48,7 +50,7 @@ export default function AndroidNoteViewPage() {
         return;
       }
 
-      socket = new WebSocket(configuredHost);
+      socket = new WebSocket(toWebSocketUrl(configuredHost));
       timeout = window.setTimeout(() => {
         socket?.close();
         setError('The host took too long to respond.');
@@ -65,7 +67,7 @@ export default function AndroidNoteViewPage() {
           socket?.close();
         });
       };
-      socket.onmessage = (event) => {
+      socket.onmessage = async (event) => {
       const message = JSON.parse(event.data) as Record<string, unknown>;
       if (message.type === 'authenticated') {
         void setMobileValue(mobileKeys.sessionId, String(message.sessionId || ''));
@@ -80,7 +82,8 @@ export default function AndroidNoteViewPage() {
           .find((candidate) => (candidate as NoteItem).topicId === requestedId) as NoteItem | undefined;
         if (!selectedNote) setError('This note is no longer available.');
         else {
-          setNote(selectedNote);
+          const downloadedImages = await downloadNoteImages(selectedNote.images, configuredHost, selectedNote.topicId);
+          setNote({ ...selectedNote, images: downloadedImages });
           setStatus('');
         }
         window.clearTimeout(timeout);
@@ -111,7 +114,7 @@ export default function AndroidNoteViewPage() {
 
   return (
     <main className="min-h-dvh bg-[#091012] text-slate-100">
-      <div className="mx-auto min-h-dvh w-full max-w-lg px-5 pb-10 pt-6">
+      <div className="mx-auto min-h-dvh w-full max-w-lg px-5 pb-10 pt-[calc(1.5rem+env(safe-area-inset-top))]">
         <header className="flex items-center gap-4">
           <button type="button" onClick={() => router.push('/android/dashboard')} aria-label="Back to dashboard" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.05] text-xl text-slate-300 active:scale-95">&#8592;</button>
           <div className="min-w-0">
@@ -130,7 +133,7 @@ export default function AndroidNoteViewPage() {
 
         {note && (
           <>
-            <section className="mt-7 rounded-3xl border border-white/10 bg-[#111a1c] p-5">
+            <section className="mt-8 px-1">
               <div className="flex items-center justify-between gap-4">
                 <div>
                   <p className="text-xs uppercase tracking-[0.16em] text-teal-300/80">{note.images?.length || 0} pages</p>
@@ -141,11 +144,10 @@ export default function AndroidNoteViewPage() {
               <p className="mt-3 text-sm text-slate-500">{note.subTopics?.length || 0} subtopics · {formatDate(note.timestamp)}</p>
             </section>
 
-            <section className="mt-5 space-y-4">
+            <section className="mt-8 space-y-8">
               {note.images?.map((image, index) => (
-                <figure key={`${image}-${index}`} className="overflow-hidden rounded-3xl border border-white/10 bg-[#111a1c] shadow-2xl shadow-black/20">
+                <figure key={`${image}-${index}`}>
                   <img src={imageSource(image, hostUrl)} alt={`Page ${index + 1} of ${note.topicName}`} className="block h-auto w-full" />
-                  <figcaption className="px-4 py-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-600">Page {index + 1}</figcaption>
                 </figure>
               ))}
             </section>

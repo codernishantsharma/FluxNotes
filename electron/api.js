@@ -18,10 +18,55 @@ const helpers_1 = require("./utils/helpers");
 const ACCESS_TTL_MS = 60 * 60 * 1000;
 const RENEW_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const HEARTBEAT_INTERVAL_MS = 30_000;
+const MOBILE_WS_PATH = '/ws/api';
+const LEGACY_WS_PATH = '/ws';
 const apiPort = Number(process.env.FLUXNOTES_API_PORT || 8787);
 const apiHost = process.env.FLUXNOTES_API_HOST || '127.0.0.1';
 const apiTokenPath = path_1.default.join(electron_1.app.getPath('userData'), 'fluxnotes-api-token');
+const responseLogPath = path_1.default.join(electron_1.app.getPath('userData'), 'response.json');
 const signingSecret = (0, crypto_1.randomBytes)(32);
+function responseLoggingEnabled() {
+    return !['0', 'false', 'off', 'no'].includes((process.env.FLUXNOTES_API_RESPONSE_LOGGING || 'true').toLowerCase());
+}
+function responseSensitiveDataEnabled() {
+    return !['0', 'false', 'off', 'no'].includes((process.env.FLUXNOTES_API_RESPONSE_LOG_SENSITIVE || 'true').toLowerCase());
+}
+function redactResponse(value) {
+    if (responseSensitiveDataEnabled())
+        return value;
+    if (typeof value === 'string') {
+        return value.replace(/((?:authToken|accessToken|renewToken|sessionToken|token)=)[^&\s"}]+/gi, '$1[redacted]');
+    }
+    if (Array.isArray(value))
+        return value.map(redactResponse);
+    if (value && typeof value === 'object') {
+        return Object.fromEntries(Object.entries(value).map(([key, nestedValue]) => ([/token/i, /password/i, /secret/i].some((pattern) => pattern.test(key))
+            ? [key, '[redacted]']
+            : [key, redactResponse(nestedValue)])));
+    }
+    return value;
+}
+function logResponse(transport, response, metadata) {
+    if (!responseLoggingEnabled())
+        return;
+    try {
+        let entries = [];
+        try {
+            const existing = JSON.parse((0, fs_1.readFileSync)(responseLogPath, 'utf8'));
+            if (Array.isArray(existing))
+                entries = existing;
+        }
+        catch {
+            // Start a new response log when the file does not exist or is invalid.
+        }
+        entries.push({ timestamp: new Date().toISOString(), transport, ...metadata, response: redactResponse(response) });
+        (0, fs_1.writeFileSync)(responseLogPath, JSON.stringify(entries, null, 2), { encoding: 'utf8', mode: 0o600 });
+        (0, fs_1.chmodSync)(responseLogPath, 0o600);
+    }
+    catch (error) {
+        console.error('[API] Failed to write response log:', error);
+    }
+}
 function loadOrCreateApiToken() {
     const configuredToken = process.env.FLUXNOTES_API_TOKEN?.trim();
     if (configuredToken) {
@@ -133,6 +178,7 @@ function authorizedSession(sessionId, token) {
     return session && session.accessToken === token && readToken(token, 'access', sessionId) ? session : null;
 }
 function json(response, statusCode, body) {
+    logResponse('http', body, { statusCode, contentType: 'application/json' });
     response.writeHead(statusCode, { 'content-type': 'application/json; charset=utf-8' });
     response.end(JSON.stringify(body));
 }
@@ -149,6 +195,19 @@ function imagePathFromRequest(request) {
     }
     catch {
         return null;
+    }
+}
+function imageContentType(imagePath) {
+    switch (path_1.default.extname(imagePath).toLowerCase()) {
+        case '.jpg':
+        case '.jpeg':
+            return 'image/jpeg';
+        case '.webp':
+            return 'image/webp';
+        case '.gif':
+            return 'image/gif';
+        default:
+            return 'image/png';
     }
 }
 function imageUrl(filePath, session) {
@@ -169,8 +228,10 @@ async function notesPayload(session) {
     }));
 }
 function sendSocket(socket, body) {
-    if (socket.readyState === ws_1.WebSocket.OPEN)
+    if (socket.readyState === ws_1.WebSocket.OPEN) {
+        logResponse('websocket', body);
         socket.send(JSON.stringify(body));
+    }
 }
 function mobileInfo(session) {
     return {
@@ -178,7 +239,7 @@ function mobileInfo(session) {
         appVersion: electron_1.app.getVersion(),
         apiVersion: 1,
         transport: 'websocket',
-        endpoint: '/ws',
+        endpoint: MOBILE_WS_PATH,
         heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS,
         accessTokenExpiresAt: session.accessExpiresAt,
         renewTokenExpiresAt: session.renewExpiresAt,
@@ -187,7 +248,12 @@ function mobileInfo(session) {
         capabilities: ['list_notes', 'get_device_info', 'get_mobile_info', 'ping', 'renew'],
     };
 }
-function handleSocket(socket) {
+function handleSocket(socket, request) {
+    const requestPath = new URL(request.url || '/', `http://${apiHost}:${apiPort}`).pathname.replace(/\/$/, '');
+    if (requestPath !== MOBILE_WS_PATH && requestPath !== LEGACY_WS_PATH) {
+        socket.close(1008, 'Unsupported WebSocket path');
+        return;
+    }
     let session = null;
     let isAlive = true;
     const heartbeat = setInterval(() => {
@@ -306,7 +372,9 @@ function handleHttp(request, response) {
             json(response, 404, { error: 'Image not found.' });
             return;
         }
-        response.writeHead(200, { 'content-type': 'application/octet-stream', 'cache-control': 'private, max-age=3600' });
+        const contentType = imageContentType(imagePath);
+        logResponse('http', { type: 'image', path: path_1.default.basename(imagePath) }, { statusCode: 200, contentType });
+        response.writeHead(200, { 'content-type': contentType, 'cache-control': 'private, max-age=3600' });
         (0, fs_1.createReadStream)(imagePath).pipe(response);
         return;
     }
@@ -323,13 +391,13 @@ async function startApiServer() {
         throw new Error(`Invalid FLUXNOTES_API_PORT: ${apiPort}`);
     }
     server = (0, http_1.createServer)(handleHttp);
-    webSocketServer = new ws_1.WebSocketServer({ server, path: '/ws' });
+    webSocketServer = new ws_1.WebSocketServer({ server });
     webSocketServer.on('connection', handleSocket);
     await new Promise((resolve, reject) => {
         server?.once('error', reject);
         server?.listen(apiPort, apiHost, resolve);
     });
-    console.log(`[API] WebSocket server listening at ws://${apiHost}:${apiPort}/ws`);
+    console.log(`[API] WebSocket server listening at ws://${apiHost}:${apiPort}${MOBILE_WS_PATH}`);
     return true;
 }
 async function stopApiServer() {

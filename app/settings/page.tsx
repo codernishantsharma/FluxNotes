@@ -108,7 +108,7 @@ export default function SettingsPage() {
   };
 
   const websocketUrl = ngrokState.url
-    ? `${ngrokState.url.replace(/^https?:\/\//, 'wss://').replace(/\/$/, '')}/ws`
+    ? `${ngrokState.url.replace(/^https?:\/\//, 'wss://').replace(/\/$/, '')}/ws/api`
     : null;
 
   useEffect(() => {
@@ -179,7 +179,7 @@ export default function SettingsPage() {
             <button onClick={disableNgrok} disabled={isSaving || !ngrokState.configured} className="settings-danger disabled:opacity-40">Disable tunnel</button>
             <button onClick={saveNgrok} disabled={isSaving} className="settings-primary disabled:opacity-50">{isSaving ? 'Saving...' : 'Save and start tunnel'}</button>
           </div>
-          <p className="mt-4 text-xs leading-5 text-slate-500">Mobile clients use the tunnel URL with <code className="text-slate-300">wss://</code> at <code className="text-slate-300">/ws</code>. The local API defaults to port <code className="text-slate-300">8787</code>.</p>
+          <p className="mt-4 text-xs leading-5 text-slate-500">Mobile clients use the tunnel URL with <code className="text-slate-300">wss://</code> at <code className="text-slate-300">/ws/api</code>. The local API defaults to port <code className="text-slate-300">8787</code>.</p>
           {pairingQr && <div className="mt-5 flex items-center gap-4 rounded-lg border border-white/10 bg-black/20 p-3"><img src={pairingQr} alt="Mobile pairing QR code" className="h-28 w-28 rounded-md" /><div><div className="text-xs font-medium text-slate-200">Pair Android app</div><p className="mt-1 text-[10px] leading-4 text-slate-500">Scan this code from the first Android screen to import the host URL and auth token.</p></div></div>}
         </SettingSection>
       );

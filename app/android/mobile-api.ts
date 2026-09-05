@@ -1,4 +1,4 @@
-import { getMobileDeviceInfo, getMobileValue, mobileKeys, setMobileValue } from './mobile-storage';
+import { getMobileDeviceInfo, getMobileValue, mobileKeys, setMobileValue, toWebSocketUrl } from './mobile-storage';
 
 export type MobileCommand = {
   type: string;
@@ -14,7 +14,7 @@ export async function sendMobileCommand<T = Record<string, unknown>>(command: Mo
   if (!hostUrl || !authToken) throw new Error('Host not configured.');
 
   return new Promise<T>((resolve, reject) => {
-    const socket = new WebSocket(hostUrl);
+    const socket = new WebSocket(toWebSocketUrl(hostUrl));
     let settled = false;
     const timeout = window.setTimeout(() => finish(new Error('Host connection timed out.')), 15000);
     const finish = (error?: Error, value?: T) => {

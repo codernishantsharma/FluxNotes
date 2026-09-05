@@ -91,7 +91,9 @@ Ngrok Tunnel. The desktop UI continues to use Next.js on port `3000`; the
 mobile client does not connect to that port.
 
 The public URL printed by ngrok is the mobile API endpoint. Use its `wss://`
-equivalent plus `/ws`, for example `wss://your-domain.ngrok.app/ws`.
+For the Android host setting, use the HTTPS API URL, for example
+`https://your-domain.ngrok.app/api`. The app derives the WebSocket connection
+as `wss://your-domain.ngrok.app/ws/api` automatically.
 The mobile client authenticates over that WebSocket:
 
 ```json
@@ -154,9 +156,15 @@ The mobile dashboard is packaged with Capacitor. Its routes are
 `/android`, `/android/dashboard`, `/android/settings`, and `/android/view`. On
 first launch, `/android` opens the native barcode scanner. Scan the QR code
 shown in desktop Settings to import a payload shaped as
-`{"host":"wss://.../ws","authToken":"..."}`. Host URL, host token, device
+`{"host":"https://.../api","authToken":"..."}`. Host URL, host token, device
 ID, and session credentials use Capacitor Preferences; note operations use the
 authenticated WebSocket API.
+
+For temporary host-response debugging, responses are logged to
+Electron's global user-data `response.json` file by default. Sensitive response
+data is visible by default; restore redaction with
+`FLUXNOTES_API_RESPONSE_LOG_SENSITIVE=false`, or disable logging entirely with
+`FLUXNOTES_API_RESPONSE_LOGGING=false`.
 
 ```bash
 npm run build:android   # Build Next assets and sync Android
