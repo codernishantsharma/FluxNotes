@@ -2,7 +2,6 @@ import { Preferences } from '@capacitor/preferences';
 import { Device } from '@capacitor/device';
 import { Capacitor } from '@capacitor/core';
 import { Directory, Filesystem } from '@capacitor/filesystem';
-import { Http } from '@capacitor/http';
 
 export const mobileKeys = {
   hostUrl: 'fluxnotes-android-host-url',
@@ -72,24 +71,16 @@ export async function downloadNoteImages(
     if (imagePath.startsWith('local://') || imagePath.startsWith('data:')) return imagePath;
     try {
       const imageUrl = imageRequestUrl(imagePath, hostUrl);
-      let contentType = 'image/png';
-      let webResponse: Response | null = null;
-      if (!Capacitor.isNativePlatform()) {
-        webResponse = await fetch(imageUrl);
-        if (!webResponse.ok) throw new Error(`Image request failed with ${webResponse.status}`);
-        contentType = webResponse.headers.get('content-type') || contentType;
-      }
+      const response = await fetch(imageUrl);
+      if (!response.ok) throw new Error(`Image request failed with ${response.status}`);
+      const contentType = response.headers.get('content-type') || 'image/png';
       const extension = contentType.includes('jpeg') ? 'jpg' : contentType.includes('webp') ? 'webp' : contentType.includes('gif') ? 'gif' : 'png';
       const safePrefix = filePrefix.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 48);
       const filePath = `images/${safePrefix}-${index}.${extension}`;
       const existing = await Filesystem.getUri({ directory: Directory.Data, path: filePath }).catch(() => null);
       if (existing?.uri) return Capacitor.convertFileSrc(existing.uri);
-      if (Capacitor.isNativePlatform()) {
-        await Http.downloadFile({ url: imageUrl, filePath, fileDirectory: Directory.Data });
-      } else {
-        const bytes = new Uint8Array(await webResponse!.arrayBuffer());
-        await Filesystem.writeFile({ directory: Directory.Data, path: filePath, data: base64FromBytes(bytes), recursive: true });
-      }
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      await Filesystem.writeFile({ directory: Directory.Data, path: filePath, data: base64FromBytes(bytes), recursive: true });
       const saved = await Filesystem.getUri({ directory: Directory.Data, path: filePath });
       return Capacitor.convertFileSrc(saved.uri);
     } catch (error) {
