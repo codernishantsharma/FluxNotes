@@ -3,7 +3,7 @@
 /* eslint-disable @next/next/no-img-element */
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { downloadNoteImages, getMobileDeviceInfo, getMobileValue, mobileKeys, setMobileValue, toWebSocketUrl } from '../mobile-storage';
+import { downloadNoteImages, getMobileDeviceInfo, getMobileValue, mobileKeys, setMobileValue, toHttpApiUrl, toWebSocketUrl } from '../mobile-storage';
 
 type NoteItem = {
   topicId: string;
@@ -16,10 +16,7 @@ type NoteItem = {
 
 function imageSource(imagePath: string, hostUrl: string): string {
   if (imagePath.startsWith('http://') || imagePath.startsWith('https://') || imagePath.startsWith('data:')) return imagePath;
-  const url = new URL(hostUrl);
-  url.protocol = url.protocol === 'wss:' ? 'https:' : 'http:';
-  url.pathname = imagePath.startsWith('/api/') ? imagePath : `/api${imagePath.startsWith('/') ? imagePath : `/${imagePath}`}`;
-  return url.toString();
+  return toHttpApiUrl(hostUrl, imagePath);
 }
 
 export default function AndroidNoteViewPage() {
@@ -82,7 +79,9 @@ export default function AndroidNoteViewPage() {
           .find((candidate) => (candidate as NoteItem).topicId === requestedId) as NoteItem | undefined;
         if (!selectedNote) setError('This note is no longer available.');
         else {
-          const downloadedImages = await downloadNoteImages(selectedNote.images, configuredHost, selectedNote.topicId);
+        //remove /ws from the configured host
+          const sanitizedUrl = configuredHost.replace(/\/ws$/, '');
+          const downloadedImages = await downloadNoteImages(selectedNote.images, sanitizedUrl, selectedNote.topicId);
           setNote({ ...selectedNote, images: downloadedImages });
           setStatus('');
         }

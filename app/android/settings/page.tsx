@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { getMobileValue, mobileKeys, setMobileValue } from '../mobile-storage';
+import { sendMobileCommand } from '../mobile-api';
 
 export default function AndroidSettingsPage() {
   const router = useRouter();
@@ -10,6 +11,31 @@ export default function AndroidSettingsPage() {
   const [hostToken, setHostToken] = useState('');
   const [showToken, setShowToken] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [logs, setLogs] = useState<{ requestLog?: unknown[]; responseLog?: unknown[] } | null>(null);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [logsError, setLogsError] = useState('');
+
+  const loadLogs = async () => {
+    setLogsLoading(true);
+    setLogsError('');
+    try {
+      const result = await sendMobileCommand<{ requestLog?: unknown[]; responseLog?: unknown[] }>({ type: 'get_logs' });
+      setLogs(result);
+    } catch (error) {
+      setLogsError(error instanceof Error ? error.message : 'Unable to load logs.');
+    } finally {
+      setLogsLoading(false);
+    }
+  };
+
+  const clearLogs = async () => {
+    try {
+      await sendMobileCommand({ type: 'clear_logs' });
+      setLogs({ requestLog: [], responseLog: [] });
+    } catch (error) {
+      setLogsError(error instanceof Error ? error.message : 'Unable to clear logs.');
+    }
+  };
 
   useEffect(() => {
     void Promise.all([getMobileValue(mobileKeys.hostUrl), getMobileValue(mobileKeys.hostToken)])
@@ -91,6 +117,21 @@ export default function AndroidSettingsPage() {
           <button type="button" onClick={saveSettings} className="mt-7 flex h-12 w-full items-center justify-center rounded-2xl bg-teal-300 text-sm font-semibold text-[#092022] shadow-lg shadow-teal-950/30 active:scale-[0.98]">
             {saved ? 'Saved' : 'Save connection'}
           </button>
+        </section>
+
+        <section className="mt-6 rounded-[28px] border border-white/10 bg-[#111a1c] p-5 shadow-2xl shadow-black/20">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="font-semibold text-white">App logs</h2>
+              <p className="mt-1 text-sm text-slate-500">Incoming requests and outgoing responses from the desktop host.</p>
+            </div>
+            <button type="button" onClick={() => void loadLogs()} disabled={logsLoading} className="rounded-xl bg-white/[0.07] px-3 py-2 text-xs font-semibold text-teal-300 disabled:opacity-40">{logsLoading ? 'Loading' : 'Refresh'}</button>
+          </div>
+          {logsError && <p className="mt-4 text-xs text-rose-300">{logsError}</p>}
+          {logs && <>
+            <pre className="mt-4 max-h-72 overflow-auto rounded-2xl bg-black/30 p-3 text-[10px] leading-4 text-slate-400">{JSON.stringify(logs, null, 2)}</pre>
+            <button type="button" onClick={() => void clearLogs()} className="mt-4 rounded-xl px-3 py-2 text-xs font-semibold text-rose-300 active:bg-rose-300/10">Clear logs</button>
+          </>}
         </section>
 
         <p className="mt-5 px-2 text-center text-xs leading-5 text-slate-600">Your host details stay on this device. The token is sent only when opening the secure WebSocket connection.</p>

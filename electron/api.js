@@ -24,6 +24,7 @@ const apiPort = Number(process.env.FLUXNOTES_API_PORT || 8787);
 const apiHost = process.env.FLUXNOTES_API_HOST || '127.0.0.1';
 const apiTokenPath = path_1.default.join(electron_1.app.getPath('userData'), 'fluxnotes-api-token');
 const responseLogPath = path_1.default.join(electron_1.app.getPath('userData'), 'response.json');
+const requestLogPath = path_1.default.join(electron_1.app.getPath('userData'), 'request.json');
 const signingSecret = (0, crypto_1.randomBytes)(32);
 function responseLoggingEnabled() {
     return !['0', 'false', 'off', 'no'].includes((process.env.FLUXNOTES_API_RESPONSE_LOGGING || 'true').toLowerCase());
@@ -66,6 +67,40 @@ function logResponse(transport, response, metadata) {
     catch (error) {
         console.error('[API] Failed to write response log:', error);
     }
+}
+function logRequest(transport, request, metadata) {
+    if (!responseLoggingEnabled())
+        return;
+    try {
+        let entries = [];
+        try {
+            const existing = JSON.parse((0, fs_1.readFileSync)(requestLogPath, 'utf8'));
+            if (Array.isArray(existing))
+                entries = existing;
+        }
+        catch {
+            // Start a new request log when the file does not exist or is invalid.
+        }
+        entries.push({ timestamp: new Date().toISOString(), transport, ...metadata, request: redactResponse(request) });
+        (0, fs_1.writeFileSync)(requestLogPath, JSON.stringify(entries, null, 2), { encoding: 'utf8', mode: 0o600 });
+        (0, fs_1.chmodSync)(requestLogPath, 0o600);
+    }
+    catch (error) {
+        console.error('[API] Failed to write request log:', error);
+    }
+}
+function readLogFile(filePath) {
+    try {
+        const value = JSON.parse((0, fs_1.readFileSync)(filePath, 'utf8'));
+        return Array.isArray(value) ? value.slice(-200) : [];
+    }
+    catch {
+        return [];
+    }
+}
+function clearLogFile(filePath) {
+    (0, fs_1.writeFileSync)(filePath, '[]', { encoding: 'utf8', mode: 0o600 });
+    (0, fs_1.chmodSync)(filePath, 0o600);
 }
 function loadOrCreateApiToken() {
     const configuredToken = process.env.FLUXNOTES_API_TOKEN?.trim();
@@ -179,7 +214,12 @@ function authorizedSession(sessionId, token) {
 }
 function json(response, statusCode, body) {
     logResponse('http', body, { statusCode, contentType: 'application/json' });
-    response.writeHead(statusCode, { 'content-type': 'application/json; charset=utf-8' });
+    response.writeHead(statusCode, {
+        'access-control-allow-origin': '*',
+        'access-control-allow-methods': 'GET, OPTIONS',
+        'access-control-allow-headers': 'authorization, content-type',
+        'content-type': 'application/json; charset=utf-8',
+    });
     response.end(JSON.stringify(body));
 }
 function imagePathFromRequest(request) {
@@ -272,6 +312,7 @@ function handleSocket(socket, request) {
     });
     socket.on('message', async (raw) => {
         try {
+            logRequest('websocket', raw.toString(), { path: 'websocket-message' });
             const message = JSON.parse(raw.toString());
             if (message.type === 'ping') {
                 sendSocket(socket, { type: 'pong', timestamp: Date.now() });
@@ -348,6 +389,20 @@ function handleSocket(socket, request) {
                 });
                 return;
             }
+            if (message.type === 'get_logs') {
+                sendSocket(socket, {
+                    type: 'logs',
+                    requestLog: readLogFile(requestLogPath),
+                    responseLog: readLogFile(responseLogPath),
+                });
+                return;
+            }
+            if (message.type === 'clear_logs') {
+                clearLogFile(requestLogPath);
+                clearLogFile(responseLogPath);
+                sendSocket(socket, { type: 'command_result', command: message.type, success: true });
+                return;
+            }
             sendSocket(socket, { type: 'error', code: 'UNKNOWN_COMMAND', message: 'Unknown command.' });
         }
         catch {
@@ -357,6 +412,21 @@ function handleSocket(socket, request) {
 }
 function handleHttp(request, response) {
     const url = new URL(request.url || '/', `http://${apiHost}:${apiPort}`);
+    logRequest('http', {
+        method: request.method,
+        path: url.pathname,
+        query: Object.fromEntries(url.searchParams),
+        headers: request.headers,
+    });
+    if (request.method === 'OPTIONS') {
+        response.writeHead(204, {
+            'access-control-allow-origin': '*',
+            'access-control-allow-methods': 'GET, OPTIONS',
+            'access-control-allow-headers': 'authorization, content-type',
+        });
+        response.end();
+        return;
+    }
     if (url.pathname === '/health') {
         json(response, 200, { ok: true, service: 'fluxnotes-api' });
         return;
@@ -374,7 +444,11 @@ function handleHttp(request, response) {
         }
         const contentType = imageContentType(imagePath);
         logResponse('http', { type: 'image', path: path_1.default.basename(imagePath) }, { statusCode: 200, contentType });
-        response.writeHead(200, { 'content-type': contentType, 'cache-control': 'private, max-age=3600' });
+        response.writeHead(200, {
+            'access-control-allow-origin': '*',
+            'content-type': contentType,
+            'cache-control': 'private, max-age=3600',
+        });
         (0, fs_1.createReadStream)(imagePath).pipe(response);
         return;
     }

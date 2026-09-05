@@ -50,9 +50,10 @@ export default function AndroidDashboardPage() {
       setConnectionStatus('Loading notes');
       const response = await sendMobileCommand<{ notes?: unknown[] }>({ type: 'list_notes' });
       const receivedNotes = Array.isArray(response.notes) ? response.notes as NoteItem[] : [];
+       const sanitizedUrl = hostUrl.replace(/\/ws$/, '')
       const downloadedNotes = await Promise.all(receivedNotes.map(async (note) => ({
         ...note,
-        images: await downloadNoteImages(note.images, hostUrl, note.topicId),
+        images: await downloadNoteImages(note.images, sanitizedUrl, note.topicId),
       })));
       setNotes(downloadedNotes);
       setConnectionStatus('Connected');

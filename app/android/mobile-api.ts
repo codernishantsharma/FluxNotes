@@ -37,7 +37,7 @@ export async function sendMobileCommand<T = Record<string, unknown>>(command: Mo
         socket.send(JSON.stringify({ ...command, sessionId: message.sessionId, token: message.token }));
       } else if (message.type === 'error' || message.type === 'command_error') {
         finish(new Error(String(message.message || 'Host command failed.')));
-      } else if (message.type === 'notes' || message.type === 'command_result' || message.type === 'device_info' || message.type === 'mobile_info') {
+      } else if (message.type === 'notes' || message.type === 'logs' || message.type === 'command_result' || message.type === 'device_info' || message.type === 'mobile_info') {
         finish(undefined, message as T);
       }
     };

@@ -17,6 +17,7 @@ const apiPort = Number(process.env.FLUXNOTES_API_PORT || 8787);
 const apiHost = process.env.FLUXNOTES_API_HOST || '127.0.0.1';
 const apiTokenPath = path.join(app.getPath('userData'), 'fluxnotes-api-token');
 const responseLogPath = path.join(app.getPath('userData'), 'response.json');
+const requestLogPath = path.join(app.getPath('userData'), 'request.json');
 const signingSecret = randomBytes(32);
 
 function responseLoggingEnabled(): boolean {
@@ -59,6 +60,38 @@ function logResponse(transport: 'websocket' | 'http', response: unknown, metadat
   } catch (error) {
     console.error('[API] Failed to write response log:', error);
   }
+}
+
+function logRequest(transport: 'websocket' | 'http', request: unknown, metadata?: Record<string, unknown>): void {
+  if (!responseLoggingEnabled()) return;
+  try {
+    let entries: Record<string, unknown>[] = [];
+    try {
+      const existing = JSON.parse(readFileSync(requestLogPath, 'utf8'));
+      if (Array.isArray(existing)) entries = existing;
+    } catch {
+      // Start a new request log when the file does not exist or is invalid.
+    }
+    entries.push({ timestamp: new Date().toISOString(), transport, ...metadata, request: redactResponse(request) });
+    writeFileSync(requestLogPath, JSON.stringify(entries, null, 2), { encoding: 'utf8', mode: 0o600 });
+    chmodSync(requestLogPath, 0o600);
+  } catch (error) {
+    console.error('[API] Failed to write request log:', error);
+  }
+}
+
+function readLogFile(filePath: string): Record<string, unknown>[] {
+  try {
+    const value = JSON.parse(readFileSync(filePath, 'utf8'));
+    return Array.isArray(value) ? value.slice(-200) : [];
+  } catch {
+    return [];
+  }
+}
+
+function clearLogFile(filePath: string): void {
+  writeFileSync(filePath, '[]', { encoding: 'utf8', mode: 0o600 });
+  chmodSync(filePath, 0o600);
 }
 
 function loadOrCreateApiToken(): string {
@@ -203,7 +236,12 @@ function authorizedSession(sessionId: unknown, token: unknown): Session | null {
 
 function json(response: ServerResponse, statusCode: number, body: unknown): void {
   logResponse('http', body, { statusCode, contentType: 'application/json' });
-  response.writeHead(statusCode, { 'content-type': 'application/json; charset=utf-8' });
+  response.writeHead(statusCode, {
+    'access-control-allow-origin': '*',
+    'access-control-allow-methods': 'GET, OPTIONS',
+    'access-control-allow-headers': 'authorization, content-type',
+    'content-type': 'application/json; charset=utf-8',
+  });
   response.end(JSON.stringify(body));
 }
 
@@ -304,6 +342,7 @@ function handleSocket(socket: WebSocket, request: IncomingMessage): void {
 
   socket.on('message', async (raw) => {
     try {
+      logRequest('websocket', raw.toString(), { path: 'websocket-message' });
       const message = JSON.parse(raw.toString()) as Record<string, unknown>;
 
       if (message.type === 'ping') {
@@ -386,6 +425,22 @@ function handleSocket(socket: WebSocket, request: IncomingMessage): void {
         return;
       }
 
+      if (message.type === 'get_logs') {
+        sendSocket(socket, {
+          type: 'logs',
+          requestLog: readLogFile(requestLogPath),
+          responseLog: readLogFile(responseLogPath),
+        });
+        return;
+      }
+
+      if (message.type === 'clear_logs') {
+        clearLogFile(requestLogPath);
+        clearLogFile(responseLogPath);
+        sendSocket(socket, { type: 'command_result', command: message.type, success: true });
+        return;
+      }
+
       sendSocket(socket, { type: 'error', code: 'UNKNOWN_COMMAND', message: 'Unknown command.' });
     } catch {
       sendSocket(socket, { type: 'error', code: 'INVALID_MESSAGE', message: 'Message must be valid JSON.' });
@@ -395,6 +450,22 @@ function handleSocket(socket: WebSocket, request: IncomingMessage): void {
 
 function handleHttp(request: IncomingMessage, response: ServerResponse): void {
   const url = new URL(request.url || '/', `http://${apiHost}:${apiPort}`);
+  logRequest('http', {
+    method: request.method,
+    path: url.pathname,
+    query: Object.fromEntries(url.searchParams),
+    headers: request.headers,
+  });
+
+  if (request.method === 'OPTIONS') {
+    response.writeHead(204, {
+      'access-control-allow-origin': '*',
+      'access-control-allow-methods': 'GET, OPTIONS',
+      'access-control-allow-headers': 'authorization, content-type',
+    });
+    response.end();
+    return;
+  }
 
   if (url.pathname === '/health') {
     json(response, 200, { ok: true, service: 'fluxnotes-api' });
@@ -415,7 +486,11 @@ function handleHttp(request: IncomingMessage, response: ServerResponse): void {
     }
     const contentType = imageContentType(imagePath);
     logResponse('http', { type: 'image', path: path.basename(imagePath) }, { statusCode: 200, contentType });
-    response.writeHead(200, { 'content-type': contentType, 'cache-control': 'private, max-age=3600' });
+    response.writeHead(200, {
+      'access-control-allow-origin': '*',
+      'content-type': contentType,
+      'cache-control': 'private, max-age=3600',
+    });
     createReadStream(imagePath).pipe(response);
     return;
   }

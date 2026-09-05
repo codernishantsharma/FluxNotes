@@ -166,6 +166,9 @@ data is visible by default; restore redaction with
 `FLUXNOTES_API_RESPONSE_LOG_SENSITIVE=false`, or disable logging entirely with
 `FLUXNOTES_API_RESPONSE_LOGGING=false`.
 
+Incoming HTTP requests and WebSocket messages are logged to the matching
+`request.json` file using the same settings.
+
 ```bash
 npm run build:android   # Build Next assets and sync Android
 npm run android:open    # Open the native project in Android Studio
