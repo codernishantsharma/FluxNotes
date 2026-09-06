@@ -10,6 +10,7 @@
 !.yarn/releases
 !.yarn/versions
 
+/user_data_test
 # testing
 /coverage
 
@@ -102,10 +103,15 @@ captures/
 # Comment next line if keeping position of elements in Navigation Editor is relevant for you
 .idea/navEditor.xml
 
-# Keystore files
-# Uncomment the following lines if you do not want to check your keystore files in.
-#*.jks
-#*.keystore
+# Keystore / Signing files - NEVER commit these
+*.jks
+*.keystore
+*.p12
+*.pfx
+keystore.properties
+keys/
+signing/
+*-signing-keys/
 
 # External native build folder generated in Android Studio 2.2 and later
 .externalNativeBuild

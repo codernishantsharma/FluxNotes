@@ -1,0 +1,46 @@
+services:
+  - type: web
+    name: fluxnotes-chatgpt-server
+    runtime: docker
+    repo: https://github.com/codernishantsharma/FluxNotes
+    rootDir: docker-server
+    dockerfilePath: ./Dockerfile
+    dockerCommand: node server.js
+    region: oregon
+    plan: pro
+    numInstances: 1
+    healthCheckPath: /health
+    autoDeploy: yes
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "8787"
+      - key: HOST
+        value: "0.0.0.0"
+      - key: CHATGPT_URL
+        value: "https://chatgpt.com/"
+      - key: USER_DATA_DIR
+        value: "/app/user_data"
+      - key: VIEW_FPS
+        value: "3"
+      - key: VIEW_QUALITY
+        value: "60"
+      - key: VIEW_WIDTH
+        value: "1280"
+      - key: VIEW_HEIGHT
+        value: "800"
+      - key: LOG_RESPONSES
+        value: "true"
+      - key: USE_NGROK
+        sync: false
+      - key: NGROK_AUTHTOKEN
+        sync: false
+      - key: NGROK_DOMAIN
+        sync: false
+      - key: API_TOKEN
+        generateValue: true
+    disk:
+      name: fluxnotes-userdata
+      mountPath: /app/user_data
+      sizeGB: 2

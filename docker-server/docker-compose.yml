@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  fluxnotes-server:
+    build: .
+    container_name: fluxnotes-chatgpt-server
+    ports:
+      - "8787:8787"
+    environment:
+      - NODE_ENV=production
+      - PORT=8787
+      - HOST=0.0.0.0
+      - USE_NGROK=${USE_NGROK:-false}
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN:-}
+      - NGROK_DOMAIN=${NGROK_DOMAIN:-}
+      - CHATGPT_URL=https://chatgpt.com/
+      - USER_DATA_DIR=/app/user_data
+      - VIEW_FPS=${VIEW_FPS:-4}
+      - VIEW_QUALITY=${VIEW_QUALITY:-70}
+      - VIEW_WIDTH=${VIEW_WIDTH:-1280}
+      - VIEW_HEIGHT=${VIEW_HEIGHT:-800}
+      - API_TOKEN=${API_TOKEN:-}
+      - LOG_RESPONSES=${LOG_RESPONSES:-true}
+    volumes:
+      - fluxnotes-userdata:/app/user_data
+      - fluxnotes-logs:/app/logs
+    restart: unless-stopped
+    shm_size: '2gb'
+    cap_add:
+      - SYS_ADMIN
+
+volumes:
+  fluxnotes-userdata:
+  fluxnotes-logs:

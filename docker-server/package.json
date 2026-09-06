@@ -1,0 +1,16 @@
+{
+  "name": "fluxnotes-docker-server",
+  "version": "1.0.0",
+  "description": "Dockerized headless ChatGPT engine with browser streaming for login and WebSocket API",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "@ngrok/ngrok": "^1.7.0",
+    "express": "^4.19.2",
+    "puppeteer-core": "^25.9.0",
+    "ws": "^8.21.3"
+  }
+}

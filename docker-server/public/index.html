@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FluxNotes · Live Browser</title>
+  <style>
+    :root {
+      --bg: #0b0d11;
+      --panel: #151a24;
+      --panel-2: #1c2432;
+      --border: #242d3e;
+      --accent: #10a37f;
+      --accent-2: #0d8b6b;
+      --text: #e6e8eb;
+      --muted: #8a8f98;
+      --danger: #ef4444;
+      --warn: #f59e0b;
+      --ok: #34d399;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0; height: 100%;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+      background: var(--bg); color: var(--text);
+      overflow: hidden;
+    }
+    header {
+      position: sticky; top: 0; z-index: 10;
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 10px; padding: 10px 14px;
+      background: linear-gradient(180deg, #12161f 0%, #0e1219 100%);
+      border-bottom: 1px solid var(--border);
+      flex-wrap: wrap;
+    }
+    .brand {
+      display: flex; align-items: center; gap: 10px;
+    }
+    .brand .logo {
+      width: 26px; height: 26px; border-radius: 7px;
+      background: linear-gradient(135deg, #10a37f, #1b9de3);
+      box-shadow: 0 2px 8px rgba(16,163,127,0.35);
+    }
+    h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: -0.01em; }
+    .pills { display: flex; gap: 8px; flex-wrap: wrap; }
+    .pill {
+      padding: 4px 10px; border-radius: 999px; font-weight: 600;
+      font-size: 11px; letter-spacing: 0.02em;
+      border: 1px solid transparent;
+    }
+    .pill.ok      { background: rgba(16,163,127,0.14); color: var(--ok); border-color: rgba(16,163,127,0.28); }
+    .pill.warn    { background: rgba(245,158,11,0.14); color: #fcd34d; border-color: rgba(245,158,11,0.3); }
+    .pill.err     { background: rgba(239,68,68,0.14);  color: #fca5a5; border-color: rgba(239,68,68,0.3); }
+    .pill.muted   { background: rgba(138,143,152,0.12); color: var(--muted); }
+
+    .controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .btn {
+      background: var(--panel-2); color: var(--text);
+      border: 1px solid var(--border);
+      padding: 7px 12px; border-radius: 8px; cursor: pointer;
+      font-size: 12px; font-weight: 500;
+      transition: all .15s ease;
+    }
+    .btn:hover:not(:disabled) { background: #242d3e; border-color: #2e3a4e; }
+    .btn.primary { background: var(--accent); border-color: var(--accent); color: white; }
+    .btn.primary:hover:not(:disabled) { background: var(--accent-2); border-color: var(--accent-2); }
+    .btn:disabled { opacity: .5; cursor: not-allowed; }
+    .input, select {
+      background: #0f131b; color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px; padding: 7px 10px;
+      font-size: 12px; font-family: inherit;
+    }
+    .input:focus, select:focus { outline: none; border-color: var(--accent); }
+    .input.wide { min-width: 340px; }
+    .chip {
+      font-size: 11px; color: var(--muted);
+      background: rgba(138,143,152,0.08);
+      padding: 4px 8px; border-radius: 6px;
+      border: 1px solid var(--border);
+      font-family: ui-monospace, Menlo, monospace;
+    }
+
+    main {
+      display: flex; flex-direction: column;
+      height: calc(100vh - 54px);
+      background: #07090c;
+    }
+    .stage {
+      flex: 1; min-height: 0;
+      display: flex; align-items: center; justify-content: center;
+      padding: 12px; overflow: auto;
+      background:
+        radial-gradient(ellipse at top, rgba(16,163,127,0.08), transparent 50%),
+        repeating-linear-gradient(0deg, rgba(255,255,255,0.018) 0 1px, transparent 1px 20px),
+        repeating-linear-gradient(90deg, rgba(255,255,255,0.018) 0 1px, transparent 1px 20px),
+        #07090c;
+    }
+    .view-wrap {
+      position: relative;
+      box-shadow: 0 24px 64px rgba(0,0,0,0.6), 0 0 0 1px var(--border);
+      border-radius: 10px; overflow: hidden;
+      max-width: 100%;
+      background: black;
+      user-select: none;
+    }
+    #canvas {
+      display: block;
+      cursor: default;
+      width: 100%; height: auto;
+      background: black;
+    }
+    .view-hint {
+      position: absolute; left: 8px; bottom: 8px;
+      font-size: 10.5px; color: #c9cfd6;
+      background: rgba(0,0,0,0.55);
+      padding: 4px 8px; border-radius: 6px;
+      font-family: ui-monospace, Menlo, monospace;
+      pointer-events: none;
+      letter-spacing: 0.02em;
+    }
+    .view-indicator {
+      position: absolute; left: 8px; top: 8px;
+      display: flex; align-items: center; gap: 6px;
+      font-size: 11px; color: #fff;
+      background: rgba(0,0,0,0.55);
+      padding: 4px 9px; border-radius: 6px;
+      pointer-events: none;
+    }
+    .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #ef4444;
+      box-shadow: 0 0 0 2px rgba(239,68,68,0.25);
+      animation: pulse 1.2s ease-in-out infinite;
+    }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+    .sidebar {
+      border-top: 1px solid var(--border);
+      background: var(--panel);
+      max-height: 38vh;
+      min-height: 160px;
+      display: grid;
+      grid-template-columns: 1fr 1.2fr;
+      gap: 0;
+    }
+    @media (max-width: 900px) {
+      .sidebar { grid-template-columns: 1fr; max-height: none; }
+    }
+    .panel {
+      padding: 12px 14px; overflow: auto;
+      border-right: 1px solid var(--border);
+    }
+    .panel:last-child { border-right: none; }
+    .panel h2 {
+      margin: 0 0 8px; font-size: 11px; font-weight: 700; letter-spacing: 0.1em;
+      text-transform: uppercase; color: var(--muted);
+    }
+    .row {
+      display: grid; grid-template-columns: 120px 1fr;
+      align-items: center; gap: 8px;
+      padding: 5px 0; font-size: 12.5px;
+      border-bottom: 1px dashed rgba(36,45,62,0.5);
+    }
+    .row:last-child { border-bottom: none; }
+    .row .k { color: var(--muted); }
+    .row .v { font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; word-break: break-all; }
+    .ws-log {
+      width: 100%; min-height: 150px; max-height: calc(38vh - 40px);
+      resize: vertical;
+      background: #07090c; color: #c9cfd6;
+      border: 1px solid var(--border); border-radius: 8px;
+      padding: 10px; font-family: ui-monospace, Menlo, monospace;
+      font-size: 11.5px; white-space: pre-wrap; word-break: break-word;
+    }
+    .label { display:block; font-size: 11px; color: var(--muted); margin: 6px 0 4px; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .toolbar-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+    .hidden { display: none !important; }
+    .url-bar { display:flex; gap:6px; align-items:center; flex:1; min-width: 240px; }
+    .kbd {
+      background: #0f131b; color: var(--text);
+      border: 1px solid var(--border); border-bottom-width: 2px;
+      padding: 1px 5px; border-radius: 5px;
+      font-family: ui-monospace, Menlo, monospace; font-size: 10.5px;
+    }
+    .footer-hint {
+      padding: 6px 14px; font-size: 11px; color: var(--muted);
+      background: #0a0d12; border-top: 1px solid var(--border);
+      display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+    }
+    .footer-hint code { color: var(--text); background: rgba(255,255,255,0.06); padding: 1px 4px; border-radius: 4px; font-size: 10.5px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <div class="logo"></div>
+      <h1>FluxNotes · Live Browser</h1>
+      <div class="pills">
+        <span id="pView" class="pill muted">View: connecting…</span>
+        <span id="pLogin" class="pill err">Not logged in</span>
+        <span id="pNgrok" class="pill warn hidden">NGROK off</span>
+      </div>
+    </div>
+    <div class="url-bar">
+      <input id="navUrl" class="input wide" placeholder="https://chatgpt.com/" value="https://chatgpt.com/" />
+      <button id="btnGo" class="btn primary">Go</button>
+      <button id="btnRefresh" class="btn" title="Refresh (F5)">⟳ Refresh</button>
+      <button id="btnFit" class="btn" title="Fit canvas to stage">Fit</button>
+    </div>
+    <div class="controls">
+      <label class="chip" title="API token for view & API WebSocket auth">
+        API token
+        <input id="apiToken" class="input" style="margin-left:8px; width:160px;" type="password" placeholder="optional" />
+      </label>
+      <button id="btnAuth" class="btn">Auth</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="stage" id="stage">
+      <div class="view-wrap" id="viewWrap">
+        <div class="view-indicator">
+          <span class="dot"></span><span id="liveLabel">LIVE</span>
+          <span id="sizeLabel" class="chip" style="margin-left:6px;">—</span>
+        </div>
+        <canvas id="canvas" tabindex="0" aria-label="Live Puppeteer browser view"></canvas>
+        <div class="view-hint" id="hint">Waiting for first frame…</div>
+      </div>
+    </div>
+
+    <div class="sidebar">
+      <div class="panel">
+        <h2>Session info</h2>
+        <div class="row"><div class="k">View WS</div><div class="v" id="infoViewWs">—</div></div>
+        <div class="row"><div class="k">API WS</div><div class="v" id="infoApiWs">—</div></div>
+        <div class="row"><div class="k">Page URL</div><div class="v" id="infoUrl">—</div></div>
+        <div class="row"><div class="k">Logged in</div><div class="v" id="infoLogin">—</div></div>
+        <div class="row"><div class="k">NGROK URL</div><div class="v" id="infoNgrok">—</div></div>
+        <div class="row"><div class="k">Viewport</div><div class="v" id="infoViewport">—</div></div>
+        <div class="row"><div class="k">Stream FPS</div><div class="v" id="infoFps">—</div></div>
+        <div class="row"><div class="k">Frames decoded</div><div class="v" id="infoFrames">0</div></div>
+
+        <h2 style="margin-top:14px;">Quick API test (after login)</h2>
+        <label class="label">Send message over API WS</label>
+        <textarea id="msgText" class="input" style="width:100%; min-height: 60px; font-size:12px;" placeholder='e.g. {"status":"start"} or plain text'></textarea>
+        <div class="grid2">
+          <input id="msgSession" class="input" value="demo-session-1" placeholder="sessionId" />
+          <input id="msgReq" class="input" value="req-1" placeholder="requestId" />
+        </div>
+        <div class="toolbar-row">
+          <button id="btnAuthApi" class="btn">1. Auth API WS</button>
+          <button id="btnSend" class="btn primary" disabled>2. Send</button>
+          <button id="btnStatusApi" class="btn">Status</button>
+        </div>
+      </div>
+      <div class="panel">
+        <h2>WebSockets log (view + api)</h2>
+        <textarea id="wsLog" class="ws-log" readonly></textarea>
+      </div>
+    </div>
+  </main>
+  <div class="footer-hint">
+    <div>
+      <span class="kbd">Click</span> ·
+      <span class="kbd">Right-click</span> ·
+      <span class="kbd">Scroll</span> ·
+      <span class="kbd">Ctrl/⌘+C</span> ·
+      <span class="kbd">Ctrl/⌘+V</span> ·
+      Type when the canvas is focused.
+    </div>
+    <div>Powered by Chrome DevTools Protocol · screencast + Input.dispatch</div>
+  </div>
+
+  <script>
+  (function () {
+    'use strict';
+
+    const $ = (s) => document.querySelector(s);
+    const canvas = $('#canvas');
+    const ctx = canvas.getContext('2d', { alpha: false });
+    const stage = $('#stage');
+    const viewWrap = $('#viewWrap');
+    const sizeLabel = $('#sizeLabel');
+    const hint = $('#hint');
+    const liveLabel = $('#liveLabel');
+    const pView = $('#pView');
+    const pLogin = $('#pLogin');
+    const pNgrok = $('#pNgrok');
+    const wsLog = $('#wsLog');
+
+    let streamW = 1280, streamH = 800;
+    canvas.width = streamW; canvas.height = streamH;
+
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const VIEW_URL  = `${proto}//${location.host}/ws/view`;
+    const API_URL   = `${proto}//${location.host}/ws/api`;
+    $('#infoViewWs').textContent = VIEW_URL;
+    $('#infoApiWs').textContent  = API_URL;
+
+    function logWs(dir, txt) {
+      const stamp = new Date().toLocaleTimeString();
+      const first = typeof txt === 'string' ? txt : JSON.stringify(txt);
+      const msg = `[${stamp}] ${dir} ${first.slice(0, 800)}`;
+      wsLog.textContent = msg + '\n' + wsLog.textContent;
+    }
+
+    function setPill(el, cls, text) {
+      el.className = 'pill ' + cls;
+      el.textContent = text;
+    }
+
+    // ====== View WebSocket (CDP screencast) ======
+    let viewWs = null;
+    let viewAuthed = false;
+    let frames = 0;
+    let lastFrameAt = 0;
+    let fps = 0;
+
+    function connectView() {
+      viewWs = new WebSocket(VIEW_URL);
+      viewWs.binaryType = 'arraybuffer';
+      setPill(pView, 'warn', 'View: connecting');
+      viewWs.addEventListener('open', () => {
+        setPill(pView, 'ok', 'View: connected');
+        logWs('→', 'view ws open');
+        const tok = $('#apiToken').value;
+        if (tok) {
+          viewWs.send(JSON.stringify({ type: 'auth', apiToken: tok }));
+          logWs('→', 'view auth (with token)');
+        } else {
+          viewWs.send(JSON.stringify({ type: 'auth', apiToken: '' }));
+          logWs('→', 'view auth (no token)');
+        }
+      });
+      viewWs.addEventListener('close', () => {
+        setPill(pView, 'err', 'View: closed. Reconnecting…');
+        logWs('←', 'view ws closed. Reconnect in 1.5s');
+        viewAuthed = false;
+        setTimeout(connectView, 1500);
+      });
+      viewWs.addEventListener('error', (e) => {
+        logWs('←', 'view ws error: ' + (e.message || 'unknown'));
+      });
+      viewWs.addEventListener('message', onViewMessage);
+    }
+
+    const img = new Image();
+    img.decoding = 'async';
+
+    function drawFrame(bytesView) {
+      const blob = new Blob([bytesView], { type: 'image/jpeg' });
+      const url = URL.createObjectURL(blob);
+      img.onload = () => {
+        try {
+          ctx.drawImage(img, 0, 0, streamW, streamH);
+          URL.revokeObjectURL(url);
+          frames++;
+          const now = performance.now();
+          if (lastFrameAt) {
+            const inst = 1000 / (now - lastFrameAt);
+            fps = fps ? (fps * 0.85 + inst * 0.15) : inst;
+          }
+          lastFrameAt = now;
+          $('#infoFrames').textContent = frames.toLocaleString();
+          $('#infoFps').textContent = fps.toFixed(1);
+          hint.textContent = `Δ${Math.round(performance.now() - now)}ms · ${bytesView.length} bytes`;
+        } catch (e) {
+          hint.textContent = 'draw error: ' + (e.message || String(e));
+        }
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        hint.textContent = 'decode error (bad jpeg?)';
+      };
+      img.src = url;
+    }
+
+    function onViewMessage(ev) {
+      const data = ev.data;
+      if (data instanceof ArrayBuffer) {
+        if (data.byteLength < 20) return;
+        const dv = new DataView(data);
+        const magic = String.fromCharCode(dv.getUint8(0),dv.getUint8(1),dv.getUint8(2),dv.getUint8(3),dv.getUint8(4),dv.getUint8(5),dv.getUint8(6),dv.getUint8(7));
+        if (magic !== 'FLUXVIEW') return;
+        const version = dv.getUint32BE(8);
+        if (version !== 1) return;
+        const w = dv.getUint32BE(12);
+        const h = dv.getUint32BE(16);
+        if (w !== streamW || h !== streamH) {
+          streamW = w; streamH = h;
+          canvas.width = w; canvas.height = h;
+          $('#infoViewport').textContent = w + '×' + h;
+        }
+        sizeLabel.textContent = `${w}×${h}`;
+        drawFrame(new Uint8Array(data, 20));
+        return;
+      }
+      let msg;
+      try { msg = JSON.parse(data); } catch (_) { return; }
+      logWs('←', msg);
+      if (msg.type === 'welcome') {
+        streamW = msg.width || streamW; streamH = msg.height || streamH;
+        canvas.width = streamW; canvas.height = streamH;
+        $('#infoViewport').textContent = streamW + '×' + streamH;
+        sizeLabel.textContent = streamW + '×' + streamH;
+        if (msg.url) { $('#infoUrl').textContent = msg.url; }
+        $('#infoNgrok').textContent = msg.ngrokUrl || 'Not active';
+        if (msg.ngrokUrl) { setPill(pNgrok, 'ok', 'NGROK: '+ (String(msg.ngrokUrl).replace(/^https?:\/\//,'').slice(0,24)) + '…'); pNgrok.classList.remove('hidden'); }
+        if (msg.requiresApiToken && !$('#apiToken').value) {
+          setPill(pView, 'warn', 'View: needs token');
+          hint.textContent = 'Enter API token and click Auth';
+        } else {
+          viewAuthed = true;
+          hint.textContent = 'Waiting for first CDP frame…';
+        }
+        if (msg.loggedIn) setPill(pLogin, 'ok', 'Logged in');
+        else setPill(pLogin, 'err', 'Not logged in');
+        $('#infoLogin').textContent = msg.loggedIn ? 'Yes' : 'No';
+      } else if (msg.type === 'authenticated') {
+        viewAuthed = true;
+        setPill(pView, 'ok', 'View: authed');
+        $('#infoLogin').textContent = msg.loggedIn ? 'Yes' : 'No';
+        $('#infoUrl').textContent = msg.url || $('#infoUrl').textContent;
+        if (msg.loggedIn) setPill(pLogin, 'ok', 'Logged in');
+      } else if (msg.type === 'error') {
+        hint.textContent = 'Error: ' + (msg.message || String(msg.code || ''));
+      } else if (msg.type === 'status') {
+        $('#infoLogin').textContent = msg.loggedIn ? 'Yes' : 'No';
+        $('#infoUrl').textContent = msg.url || $('#infoUrl').textContent;
+        if (msg.loggedIn) setPill(pLogin, 'ok', 'Logged in');
+        else setPill(pLogin, 'err', 'Not logged in');
+      } else if (msg.type === 'url') {
+        $('#infoUrl').textContent = msg.url || '';
+      }
+    }
+
+    // ====== Input forwarding over view WS ======
+    function sendView(obj) {
+      if (viewWs && viewWs.readyState === 1) viewWs.send(JSON.stringify(obj));
+    }
+
+    function eventMods(e) {
+      return {
+        alt: !!e.altKey,
+        ctrl: !!e.ctrlKey || !!e.metaKey,
+        meta: !!e.metaKey,
+        shift: !!e.shiftKey,
+      };
+    }
+
+    function canvasCoords(e) {
+      const rect = canvas.getBoundingClientRect();
+      const sx = streamW / rect.width;
+      const sy = streamH / rect.height;
+      return {
+        x: Math.round((e.clientX - rect.left) * sx),
+        y: Math.round((e.clientY - rect.top) * sy),
+      };
+    }
+
+    let lastClickAt = 0;
+    let clickCount = 1;
+
+    canvas.addEventListener('mousedown', (e) => {
+      canvas.focus();
+      e.preventDefault();
+      const { x, y } = canvasCoords(e);
+      const now = performance.now();
+      clickCount = (now - lastClickAt < 400) ? Math.min(3, clickCount + 1) : 1;
+      lastClickAt = now;
+      const buttonName = e.button === 2 ? 'right' : (e.button === 1 ? 'middle' : 'left');
+      sendView({ type: 'mouse', event: 'pressed', x, y, button: buttonName, clickCount, ...eventMods(e) });
+    });
+    canvas.addEventListener('mouseup', (e) => {
+      e.preventDefault();
+      const { x, y } = canvasCoords(e);
+      const buttonName = e.button === 2 ? 'right' : (e.button === 1 ? 'middle' : 'left');
+      sendView({ type: 'mouse', event: 'released', x, y, button: buttonName, clickCount, ...eventMods(e) });
+    });
+    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+    canvas.addEventListener('mousemove', (e) => {
+      const { x, y } = canvasCoords(e);
+      sendView({ type: 'mouse', event: 'moved', x, y, ...eventMods(e) });
+    });
+    canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const { x, y } = canvasCoords(e);
+      sendView({ type: 'mouse', event: 'wheel', x, y, deltaX: Math.round(e.deltaX), deltaY: Math.round(e.deltaY), ...eventMods(e) });
+    }, { passive: false });
+
+    function sendKeyEvent(eventType, e) {
+      const payload = {
+        type: 'key',
+        event: eventType,
+        key: e.key,
+        code: e.code,
+        keyCode: e.keyCode || e.which,
+        ...eventMods(e),
+      };
+      if (eventType === 'pressed' && e.key.length === 1) {
+        payload.text = e.key;
+        payload.unmodifiedText = e.key;
+      }
+      sendView(payload);
+    }
+
+    canvas.addEventListener('keydown', (e) => {
+      const k = e.key;
+      // Avoid trapping browser reload / devtools / print
+      if ((e.ctrlKey || e.metaKey) && (k === 'r' || k === 'R' || k === 'p' || k === 'P' || k === 'w' || k === 'W')) return;
+      if ((e.ctrlKey || e.metaKey) && (k === 't' || k === 'T' || k === 'n' || k === 'N')) return;
+      if (k === 'F12') return;
+      e.preventDefault();
+      // F5 → refresh directly
+      if (k === 'F5') { sendView({ type: 'refresh' }); return; }
+      if (k === 'F6') { $('#navUrl').focus(); $('#navUrl').select(); return; }
+      sendKeyEvent('pressed', e);
+    }, { capture: true });
+    canvas.addEventListener('keyup', (e) => {
+      if (['F12'].includes(e.key)) return;
+      sendKeyEvent('released', e);
+    });
+    canvas.addEventListener('beforeinput', (e) => {
+      // Best effort: IME composition / text insertions
+      if (e.inputType && e.inputType.startsWith('insert') && e.data) {
+        sendView({ type: 'key', event: 'type', text: e.data });
+      }
+    });
+    canvas.addEventListener('paste', (e) => {
+      e.preventDefault();
+      const text = (e.clipboardData || window.clipboardData).getData('text') || '';
+      if (text) sendView({ type: 'key', event: 'type', text });
+    });
+    canvas.addEventListener('copy', (e) => {
+      // Allow the page inside the browser to handle copy; the browser-side selection
+      // is separate from this page. Send Ctrl/⌘+C keypress as a fallback:
+      e.preventDefault();
+      sendKeyEvent('pressed', new KeyboardEvent('keydown', { key: 'c', ctrlKey: !e.metaKey, metaKey: !!e.metaKey }));
+      setTimeout(() => sendKeyEvent('released', new KeyboardEvent('keyup', { key: 'c', ctrlKey: !e.metaKey, metaKey: !!e.metaKey })), 20);
+    });
+    canvas.addEventListener('cut', (e) => {
+      e.preventDefault();
+      sendKeyEvent('pressed', new KeyboardEvent('keydown', { key: 'x', ctrlKey: !e.metaKey, metaKey: !!e.metaKey }));
+      setTimeout(() => sendKeyEvent('released', new KeyboardEvent('keyup', { key: 'x', ctrlKey: !e.metaKey, metaKey: !!e.metaKey })), 20);
+    });
+
+    // ====== Header controls ======
+    $('#btnGo').addEventListener('click', () => {
+      const url = $('#navUrl').value.trim() || 'https://chatgpt.com/';
+      sendView({ type: 'navigate', url });
+      $('#infoUrl').textContent = '(navigating…)';
+    });
+    $('#navUrl').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#btnGo').click(); });
+    $('#btnRefresh').addEventListener('click', () => sendView({ type: 'refresh' }));
+    $('#btnFit').addEventListener('click', fitCanvas);
+
+    function fitCanvas() {
+      const sw = stage.clientWidth - 40;
+      const sh = stage.clientHeight - 40;
+      const ratio = Math.min(sw / streamW, sh / streamH, 1);
+      viewWrap.style.width = Math.max(320, streamW * ratio) + 'px';
+    }
+    window.addEventListener('resize', fitCanvas);
+    fitCanvas();
+
+    $('#btnAuth').addEventListener('click', () => {
+      if (viewWs && viewWs.readyState === 1) {
+        viewWs.send(JSON.stringify({ type: 'auth', apiToken: $('#apiToken').value }));
+        logWs('→', 'view auth');
+      }
+    });
+
+    // ====== Status poll (independent of view socket) ======
+    async function pollStatus() {
+      try {
+        const s = await fetch('/status').then(r => r.json());
+        $('#infoLogin').textContent = s.loggedIn ? 'Yes' : 'No';
+        $('#infoUrl').textContent   = s.url || '—';
+        $('#infoNgrok').textContent = s.ngrokUrl || 'Not active';
+        $('#infoFps').textContent   = (fps.toFixed(1)) + ' (conf ' + (s.viewFps || '?') + ')';
+        if (s.ngrokUrl) { setPill(pNgrok, 'ok', 'NGROK: '+ String(s.ngrokUrl).replace(/^https?:\/\//,'').slice(0,24) + '…'); pNgrok.classList.remove('hidden'); }
+        else pNgrok.classList.add('hidden');
+        if (s.loggedIn) setPill(pLogin, 'ok', 'Logged in');
+        else setPill(pLogin, 'err', 'Not logged in');
+      } catch (_) {}
+    }
+    setInterval(pollStatus, 2500);
+    pollStatus();
+
+    // ====== API WebSocket (chat) ======
+    let apiWs = null;
+    let apiAuthed = false;
+    function connectApi() {
+      apiWs = new WebSocket(API_URL);
+      apiWs.addEventListener('open', () => logWs('→', 'api ws open'));
+      apiWs.addEventListener('close', () => { logWs('←', 'api ws closed. Reconnect 1.5s'); setTimeout(connectApi, 1500); });
+      apiWs.addEventListener('error', (e) => logWs('←', 'api ws error: ' + (e.message || 'unknown')));
+      apiWs.addEventListener('message', (ev) => {
+        let m; try { m = JSON.parse(ev.data); } catch (_) { m = ev.data; }
+        logWs('← API', m);
+        if (m && m.type === 'authenticated') {
+          apiAuthed = true;
+          $('#btnSend').disabled = false;
+        }
+      });
+    }
+
+    $('#btnAuthApi').addEventListener('click', () => {
+      if (!apiWs || apiWs.readyState !== 1) connectApi();
+      const sendIt = () => {
+        apiWs.send(JSON.stringify({ type: 'auth', apiToken: $('#apiToken').value }));
+        logWs('→ API auth', $('#apiToken').value ? '(token)' : '(no token)');
+      };
+      if (apiWs.readyState === 1) sendIt();
+      else apiWs.addEventListener('open', sendIt, { once: true });
+    });
+    $('#btnStatusApi').addEventListener('click', () => {
+      if (!apiWs || apiWs.readyState !== 1) connectApi();
+      const sendIt = () => { apiWs.send(JSON.stringify({ type: 'status' })); logWs('→ API status'); };
+      if (apiWs.readyState === 1) sendIt();
+      else apiWs.addEventListener('open', sendIt, { once: true });
+    });
+    $('#btnSend').addEventListener('click', () => {
+      if (!apiWs) connectApi();
+      const payload = {
+        type: 'send',
+        text: $('#msgText').value || 'Hello',
+        sessionId: $('#msgSession').value || ('demo-' + Math.random().toString(36).slice(2,8)),
+        requestId: $('#msgReq').value || ('req-' + Date.now()),
+        session: null,
+        attachments: null,
+      };
+      const sendIt = () => { apiWs.send(JSON.stringify(payload)); logWs('→ API send: ' + payload.text.slice(0, 60)); };
+      if (apiWs.readyState === 1) sendIt();
+      else apiWs.addEventListener('open', sendIt, { once: true });
+    });
+
+    connectView();
+    connectApi();
+  })();
+  </script>
+</body>
+</html>

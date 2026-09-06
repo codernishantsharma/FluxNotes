@@ -1,0 +1,6 @@
+node_modules
+user_data
+logs
+tmp
+.env
+.env.local

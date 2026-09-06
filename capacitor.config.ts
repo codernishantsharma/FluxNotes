@@ -9,6 +9,9 @@ const config: CapacitorConfig = {
       enabled: true,
     },
   },
+  server: {
+    androidScheme: 'https',
+  },
 };
 
 export default config;
