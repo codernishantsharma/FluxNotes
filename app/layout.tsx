@@ -17,6 +17,13 @@ export const metadata: Metadata = {
   description: "AI handwritten notes maker using ChatGPT",
 };
 
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+};
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html

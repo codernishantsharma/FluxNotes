@@ -274,12 +274,11 @@ function imageContentType(imagePath: string): string {
   }
 }
 
-function imageUrl(filePath: string, session: Session): string {
-  const imageId = Buffer.from(filePath).toString('base64url');
-  return `/api/images/${encodeURIComponent(imageId)}?sessionId=${encodeURIComponent(session.sessionId)}&token=${encodeURIComponent(session.accessToken)}`;
+function imageDataUrl(filePath: string): string {
+  return `data:${imageContentType(filePath)};base64,${readFileSync(filePath).toString('base64')}`;
 }
 
-async function notesPayload(session: Session): Promise<unknown[]> {
+async function notesPayload(): Promise<unknown[]> {
   const notes = await getStoredNotes();
   return notes.map((note) => ({
     ...note,
@@ -287,7 +286,7 @@ async function notesPayload(session: Session): Promise<unknown[]> {
       const imagePath = path.resolve(fromLocalImageUrl(image));
       const imagesRoot = path.resolve(imagesDir);
       return imagePath.startsWith(`${imagesRoot}${path.sep}`) && existsSync(imagePath)
-        ? [imageUrl(imagePath, session)]
+        ? [imageDataUrl(imagePath)]
         : [];
     }),
   }));
@@ -387,7 +386,7 @@ function handleSocket(socket: WebSocket, request: IncomingMessage): void {
       }
 
       if (message.type === 'list_notes') {
-        sendSocket(socket, { type: 'notes', notes: await notesPayload(authorized) });
+        sendSocket(socket, { type: 'notes', notes: await notesPayload() });
         return;
       }
 

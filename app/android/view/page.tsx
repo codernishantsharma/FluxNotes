@@ -3,7 +3,7 @@
 /* eslint-disable @next/next/no-img-element */
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { downloadNoteImages, getMobileDeviceInfo, getMobileValue, mobileKeys, setMobileValue, toHttpApiUrl, toWebSocketUrl } from '../mobile-storage';
+import { downloadNoteImages, getCachedNotes, getMobileDeviceInfo, getMobileValue, mobileKeys, setCachedNotes, setMobileValue, toHttpApiUrl, toWebSocketUrl } from '../mobile-storage';
 
 type NoteItem = {
   topicId: string;
@@ -25,6 +25,7 @@ export default function AndroidNoteViewPage() {
   const [status, setStatus] = useState('Loading note');
   const [error, setError] = useState('');
   const [hostUrl, setHostUrl] = useState('');
+  const [zoomedImage, setZoomedImage] = useState<string | null>(null);
 
   useEffect(() => {
     let socket: WebSocket | null = null;
@@ -41,8 +42,14 @@ export default function AndroidNoteViewPage() {
         setStatus('');
         return;
       }
+      const cachedNotes = await getCachedNotes();
+      const cachedNote = cachedNotes.find((candidate) => candidate.topicId === requestedId);
+      if (cachedNote) {
+        setNote(cachedNote);
+        setStatus(configuredHost && authToken ? 'Updating note' : 'Cached locally');
+      }
       if (!configuredHost || !authToken) {
-        setError('Configure the host connection first.');
+        if (!cachedNote) setError('Configure the host connection first.');
         setStatus('');
         return;
       }
@@ -75,14 +82,18 @@ export default function AndroidNoteViewPage() {
         return;
       }
       if (message.type === 'notes') {
-        const selectedNote = (Array.isArray(message.notes) ? message.notes : [])
+        const receivedNotes = (Array.isArray(message.notes) ? message.notes : []) as NoteItem[];
+        const selectedNote = receivedNotes
           .find((candidate) => (candidate as NoteItem).topicId === requestedId) as NoteItem | undefined;
         if (!selectedNote) setError('This note is no longer available.');
         else {
-        //remove /ws from the configured host
           const sanitizedUrl = configuredHost.replace(/\/ws$/, '');
-          const downloadedImages = await downloadNoteImages(selectedNote.images, sanitizedUrl, selectedNote.topicId);
-          setNote({ ...selectedNote, images: downloadedImages });
+          const downloadedNotes = await Promise.all(receivedNotes.map(async (candidate) => ({
+            ...candidate,
+            images: await downloadNoteImages(candidate.images, sanitizedUrl, candidate.topicId),
+          })));
+          await setCachedNotes(downloadedNotes);
+          setNote(downloadedNotes.find((candidate) => candidate.topicId === requestedId) || selectedNote);
           setStatus('');
         }
         window.clearTimeout(timeout);
@@ -114,7 +125,7 @@ export default function AndroidNoteViewPage() {
   return (
     <main className="min-h-dvh bg-[#091012] text-slate-100">
       <div className="mx-auto min-h-dvh w-full max-w-lg px-5 pb-10 pt-[calc(1.5rem+env(safe-area-inset-top))]">
-        <header className="flex items-center gap-4">
+        <header className="-mx-5 flex items-center gap-4 bg-[#091012] px-5">
           <button type="button" onClick={() => router.push('/android/dashboard')} aria-label="Back to dashboard" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.05] text-xl text-slate-300 active:scale-95">&#8592;</button>
           <div className="min-w-0">
             <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-teal-300">FluxNotes Mobile</p>
@@ -146,13 +157,14 @@ export default function AndroidNoteViewPage() {
             <section className="mt-8 space-y-8">
               {note.images?.map((image, index) => (
                 <figure key={`${image}-${index}`}>
-                  <img src={imageSource(image, hostUrl)} alt={`Page ${index + 1} of ${note.topicName}`} className="block h-auto w-full" />
+                  <button type="button" onClick={() => setZoomedImage(imageSource(image, hostUrl))} className="block w-full cursor-zoom-in"><img src={imageSource(image, hostUrl)} alt={`Page ${index + 1} of ${note.topicName}`} className="block h-auto w-full" /></button>
                 </figure>
               ))}
             </section>
           </>
         )}
       </div>
+      {zoomedImage && <button type="button" onClick={() => setZoomedImage(null)} className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 p-4" aria-label="Close image viewer"><img src={zoomedImage} alt="Expanded note page" className="max-h-full max-w-full object-contain" /></button>}
     </main>
   );
 }

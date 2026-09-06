@@ -10,7 +10,17 @@ export const mobileKeys = {
   sessionId: 'fluxnotes-android-session-id',
   sessionToken: 'fluxnotes-android-session-token',
   renewToken: 'fluxnotes-android-renew-token',
+  notesCache: 'fluxnotes-android-notes-cache',
 } as const;
+
+export type CachedNote = {
+  topicId: string;
+  topicName: string;
+  images?: string[];
+  subTopics?: { names: string[]; pageNumber: string | number }[];
+  timestamp?: number;
+  pinned?: boolean;
+};
 
 export async function getMobileValue(key: string): Promise<string> {
   const { value } = await Preferences.get({ key });
@@ -19,6 +29,20 @@ export async function getMobileValue(key: string): Promise<string> {
 
 export async function setMobileValue(key: string, value: string): Promise<void> {
   await Preferences.set({ key, value });
+}
+
+export async function getCachedNotes(): Promise<CachedNote[]> {
+  try {
+    const value = await getMobileValue(mobileKeys.notesCache);
+    const notes = JSON.parse(value || '[]');
+    return Array.isArray(notes) ? notes : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function setCachedNotes(notes: CachedNote[]): Promise<void> {
+  await setMobileValue(mobileKeys.notesCache, JSON.stringify(notes));
 }
 
 export function toWebSocketUrl(hostUrl: string): string {
@@ -60,6 +84,21 @@ function base64FromBytes(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
+function bytesFromDataUrl(dataUrl: string): { bytes: Uint8Array; contentType: string } {
+  const match = dataUrl.match(/^data:([^;,]+)?(;base64)?,([\s\S]*)$/);
+  if (!match) throw new Error('Invalid image data URL.');
+  const contentType = match[1] || 'image/png';
+  const encodedData = match[3];
+  if (match[2]) {
+    const binary = atob(encodedData);
+    return {
+      contentType,
+      bytes: Uint8Array.from(binary, (character) => character.charCodeAt(0)),
+    };
+  }
+  return { contentType, bytes: new TextEncoder().encode(decodeURIComponent(encodedData)) };
+}
+
 export async function downloadNoteImages(
   images: string[] | undefined,
   hostUrl: string,
@@ -68,18 +107,28 @@ export async function downloadNoteImages(
   if (!images?.length || !Capacitor.isNativePlatform()) return images || [];
 
   return Promise.all(images.map(async (imagePath, index) => {
-    if (imagePath.startsWith('local://') || imagePath.startsWith('data:')) return imagePath;
+    const isDataUrl = imagePath.startsWith('data:');
+    if (imagePath.startsWith('local://')) return imagePath;
     try {
-      const imageUrl = imageRequestUrl(imagePath, hostUrl);
-      const response = await fetch(imageUrl);
-      if (!response.ok) throw new Error(`Image request failed with ${response.status}`);
-      const contentType = response.headers.get('content-type') || 'image/png';
+      let bytes: Uint8Array;
+      let contentType: string;
+      if (isDataUrl) {
+        ({ bytes, contentType } = bytesFromDataUrl(imagePath));
+      } else {
+        const imageUrl = imageRequestUrl(imagePath, hostUrl);
+        const response = await fetch(imageUrl);
+        if (!response.ok) throw new Error(`Image request failed with ${response.status}`);
+        contentType = response.headers.get('content-type') || 'image/png';
+        bytes = new Uint8Array(await response.arrayBuffer());
+      }
       const extension = contentType.includes('jpeg') ? 'jpg' : contentType.includes('webp') ? 'webp' : contentType.includes('gif') ? 'gif' : 'png';
       const safePrefix = filePrefix.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 48);
       const filePath = `images/${safePrefix}-${index}.${extension}`;
-      const existing = await Filesystem.getUri({ directory: Directory.Data, path: filePath }).catch(() => null);
-      if (existing?.uri) return Capacitor.convertFileSrc(existing.uri);
-      const bytes = new Uint8Array(await response.arrayBuffer());
+      const existing = await Filesystem.stat({ directory: Directory.Data, path: filePath }).catch(() => null);
+      if (existing) {
+        const existingUri = await Filesystem.getUri({ directory: Directory.Data, path: filePath });
+        return Capacitor.convertFileSrc(existingUri.uri);
+      }
       await Filesystem.writeFile({ directory: Directory.Data, path: filePath, data: base64FromBytes(bytes), recursive: true });
       const saved = await Filesystem.getUri({ directory: Directory.Data, path: filePath });
       return Capacitor.convertFileSrc(saved.uri);

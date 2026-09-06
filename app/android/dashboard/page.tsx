@@ -3,7 +3,7 @@
 /* eslint-disable @next/next/no-img-element */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { downloadNoteImages, getMobileValue, mobileKeys, toHttpApiUrl } from '../mobile-storage';
+import { downloadNoteImages, getCachedNotes, getMobileValue, mobileKeys, setCachedNotes, toHttpApiUrl } from '../mobile-storage';
 import { sendMobileCommand } from '../mobile-api';
 
 type NoteItem = {
@@ -29,9 +29,16 @@ export default function AndroidDashboardPage() {
   const [activeTab, setActiveTab] = useState<'home' | 'saved'>('home');
   const [connectionStatus, setConnectionStatus] = useState('Connecting');
   const [imageHostUrl, setImageHostUrl] = useState('');
+  const [zoomedImage, setZoomedImage] = useState<string | null>(null);
 
   const loadNotes = useCallback(async () => {
     setIsLoading(true);
+    const cachedNotes = await getCachedNotes();
+    if (cachedNotes.length) {
+      setNotes(cachedNotes);
+      setConnectionStatus('Cached locally');
+      setIsLoading(false);
+    }
     const [hostUrl, authToken] = await Promise.all([
       getMobileValue(mobileKeys.hostUrl),
       getMobileValue(mobileKeys.hostToken),
@@ -39,15 +46,15 @@ export default function AndroidDashboardPage() {
     setImageHostUrl(hostUrl);
 
     if (!hostUrl || !authToken) {
-      setConnectionStatus('Host not configured');
-      setNotes([]);
+      setConnectionStatus(cachedNotes.length ? 'Cached locally' : 'Host not configured');
+      if (!cachedNotes.length) setNotes([]);
       setIsLoading(false);
       return;
     }
 
     setConnectionStatus('Connecting');
     try {
-      setConnectionStatus('Loading notes');
+      setConnectionStatus(cachedNotes.length ? 'Updating notes' : 'Loading notes');
       const response = await sendMobileCommand<{ notes?: unknown[] }>({ type: 'list_notes' });
       const receivedNotes = Array.isArray(response.notes) ? response.notes as NoteItem[] : [];
        const sanitizedUrl = hostUrl.replace(/\/ws$/, '')
@@ -55,12 +62,13 @@ export default function AndroidDashboardPage() {
         ...note,
         images: await downloadNoteImages(note.images, sanitizedUrl, note.topicId),
       })));
+      await setCachedNotes(downloadedNotes);
       setNotes(downloadedNotes);
       setConnectionStatus('Connected');
     } catch (error) {
       console.error('Failed to load notes from host:', error);
       setConnectionStatus(error instanceof Error ? error.message : 'Host unavailable');
-      setNotes([]);
+      if (!cachedNotes.length) setNotes([]);
     } finally {
       setIsLoading(false);
     }
@@ -181,7 +189,7 @@ export default function AndroidDashboardPage() {
               <button type="button" onClick={() => openNote(note.topicId)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
                 <div className="h-[72px] w-[72px] shrink-0 overflow-hidden rounded-2xl bg-[#20393b]">
                   {note.images?.[0]
-                    ? <img src={toImageSource(note.images[0], imageHostUrl)} alt="" className="h-full w-full object-cover" />
+                    ? <img onClick={(event) => { event.stopPropagation(); setZoomedImage(toImageSource(note.images![0], imageHostUrl)); }} src={toImageSource(note.images[0], imageHostUrl)} alt="" className="h-full w-full object-cover" />
                     : <div className="flex h-full items-center justify-center text-teal-200/70"><BookIcon /></div>}
                 </div>
                 <div className="min-w-0">
@@ -205,6 +213,8 @@ export default function AndroidDashboardPage() {
           ))}
         </section>
       </div>
+
+      {zoomedImage && <button type="button" onClick={() => setZoomedImage(null)} className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 p-4" aria-label="Close image viewer"><img src={zoomedImage} alt="Expanded note page" className="max-h-full max-w-full object-contain" /></button>}
 
       <nav className="fixed inset-x-0 bottom-0 z-20 mx-auto flex h-[76px] max-w-lg items-center justify-around border-t border-white/10 bg-[#091012]/95 px-8 backdrop-blur-xl">
         <button type="button" onClick={() => setActiveTab('home')} className={`flex flex-col items-center gap-1 text-[10px] font-semibold ${activeTab === 'home' ? 'text-teal-300' : 'text-slate-500'}`}><HomeIcon /><span>Home</span></button>

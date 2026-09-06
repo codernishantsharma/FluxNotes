@@ -250,11 +250,10 @@ function imageContentType(imagePath) {
             return 'image/png';
     }
 }
-function imageUrl(filePath, session) {
-    const imageId = Buffer.from(filePath).toString('base64url');
-    return `/api/images/${encodeURIComponent(imageId)}?sessionId=${encodeURIComponent(session.sessionId)}&token=${encodeURIComponent(session.accessToken)}`;
+function imageDataUrl(filePath) {
+    return `data:${imageContentType(filePath)};base64,${(0, fs_1.readFileSync)(filePath).toString('base64')}`;
 }
-async function notesPayload(session) {
+async function notesPayload() {
     const notes = await (0, storage_1.getStoredNotes)();
     return notes.map((note) => ({
         ...note,
@@ -262,7 +261,7 @@ async function notesPayload(session) {
             const imagePath = path_1.default.resolve((0, helpers_1.fromLocalImageUrl)(image));
             const imagesRoot = path_1.default.resolve(storage_1.imagesDir);
             return imagePath.startsWith(`${imagesRoot}${path_1.default.sep}`) && (0, fs_1.existsSync)(imagePath)
-                ? [imageUrl(imagePath, session)]
+                ? [imageDataUrl(imagePath)]
                 : [];
         }),
     }));
@@ -352,7 +351,7 @@ function handleSocket(socket, request) {
                 return;
             }
             if (message.type === 'list_notes') {
-                sendSocket(socket, { type: 'notes', notes: await notesPayload(authorized) });
+                sendSocket(socket, { type: 'notes', notes: await notesPayload() });
                 return;
             }
             if (message.type === 'rename_note' || message.type === 'set_note_pinned' || message.type === 'delete_note') {

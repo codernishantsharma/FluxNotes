@@ -58,7 +58,7 @@ export default function AndroidSettingsPage() {
   return (
     <main className="min-h-dvh bg-[#091012] text-slate-100">
       <div className="mx-auto flex min-h-dvh w-full max-w-lg flex-col px-5 pb-8 pt-7">
-        <header className="flex items-center gap-4">
+        <header className="-mx-5 flex items-center gap-4 bg-[#091012] px-5">
           <button
             type="button"
             onClick={() => router.push('/android/dashboard')}
