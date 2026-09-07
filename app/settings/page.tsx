@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import QRCode from 'qrcode';
 
 const PROVIDER_STORAGE_KEY = 'fluxnotes-ai-provider';
-type SettingsSection = 'general' | 'provider' | 'ngrok' | 'appearance' | 'updates' | 'about';
+type SettingsSection = 'general' | 'provider' | 'ngrok' | 'docker' | 'appearance' | 'updates' | 'about';
 
 type NgrokState = {
   configured: boolean;
@@ -19,6 +19,7 @@ const sections: { id: SettingsSection; label: string; description: string }[] = 
   { id: 'general', label: 'General', description: 'App behavior and local data' },
   { id: 'provider', label: 'AI Provider', description: 'Choose your generation engine' },
   { id: 'ngrok', label: 'Ngrok Tunnel', description: 'Expose a local WebSocket service' },
+  { id: 'docker', label: 'Remote Server (Docker)', description: 'Sync ChatGPT session to remote server' },
   { id: 'appearance', label: 'Appearance', description: 'Theme and interface density' },
   { id: 'updates', label: 'Updates', description: 'Version and release settings' },
   { id: 'about', label: 'About FluxNotes', description: 'Version and project details' },
@@ -36,6 +37,12 @@ export default function SettingsPage() {
   const [pairingQr, setPairingQr] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [updateMessage, setUpdateMessage] = useState('');
+
+  const [dockerServerUrl, setDockerServerUrl] = useState('');
+  const [dockerPassword, setDockerPassword] = useState('');
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [syncMessage, setSyncMessage] = useState('');
 
   useEffect(() => {
     const savedProvider = window.localStorage.getItem(PROVIDER_STORAGE_KEY);
@@ -97,6 +104,32 @@ export default function SettingsPage() {
     }
     setNgrokState({ configured: false, active: false, url: null, port: Number(ngrokPort), domain: '' });
     setNgrokToken('');
+  };
+
+  const handleSyncSession = async () => {
+    if (!dockerServerUrl.trim()) {
+      window.alert('Please enter your Docker Server WSS URL.');
+      return;
+    }
+    if (!dockerPassword.trim()) {
+      window.alert('Please enter your Docker Server Connect Password.');
+      return;
+    }
+
+    setIsSyncing(true);
+    setSyncStatus('idle');
+    setSyncMessage('Connecting to Docker server and sending ChatGPT session cookies...');
+
+    const res = await window.electronAPI?.syncSessionToServer(dockerServerUrl, dockerPassword);
+    setIsSyncing(false);
+
+    if (res?.success) {
+      setSyncStatus('success');
+      setSyncMessage(`Session successfully synced to Docker server! Server logged in: ${res.loggedIn ? 'Yes' : 'No'}`);
+    } else {
+      setSyncStatus('error');
+      setSyncMessage(res?.error || 'Failed to sync session to Docker server.');
+    }
   };
 
   const checkForUpdates = async () => {
@@ -181,6 +214,50 @@ export default function SettingsPage() {
           </div>
           <p className="mt-4 text-xs leading-5 text-slate-500">Mobile clients use the tunnel URL with <code className="text-slate-300">wss://</code> at <code className="text-slate-300">/ws/api</code>. The local API defaults to port <code className="text-slate-300">8787</code>.</p>
           {pairingQr && <div className="mt-5 flex items-center gap-4 rounded-lg border border-white/10 bg-black/20 p-3"><img src={pairingQr} alt="Mobile pairing QR code" className="h-28 w-28 rounded-md" /><div><div className="text-xs font-medium text-slate-200">Pair Android app</div><p className="mt-1 text-[10px] leading-4 text-slate-500">Scan this code from the first Android screen to import the host URL and auth token.</p></div></div>}
+        </SettingSection>
+      );
+    }
+
+    if (activeSection === 'docker') {
+      return (
+        <SettingSection title="Remote Server (Docker)" description="Sync your desktop ChatGPT session and cookies to a remote FluxNotes Docker server.">
+          <div className="mt-5 grid gap-5 sm:grid-cols-2">
+            <Field label="Server WSS URL" hint="e.g. wss://your-app.onrender.com/ws/api or ws://192.168.1.50:8787/ws/api">
+              <input
+                type="text"
+                value={dockerServerUrl}
+                onChange={(event) => setDockerServerUrl(event.target.value)}
+                placeholder="wss://your-app.onrender.com/ws/api"
+                className="settings-input font-mono"
+              />
+            </Field>
+            <Field label="Connect Password" hint="Logged on server startup or DESKTOP_CONNECT_PASSWORD">
+              <input
+                type="password"
+                value={dockerPassword}
+                onChange={(event) => setDockerPassword(event.target.value)}
+                placeholder="Enter server connect password"
+                className="settings-input"
+              />
+            </Field>
+          </div>
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+            <button
+              onClick={handleSyncSession}
+              disabled={isSyncing || !dockerServerUrl.trim() || !dockerPassword.trim()}
+              className="settings-primary disabled:opacity-50"
+            >
+              {isSyncing ? 'Syncing Session...' : 'Sync ChatGPT Session to Server'}
+            </button>
+          </div>
+          {syncMessage && (
+            <div className={`mt-4 rounded-lg border p-3 text-xs ${syncStatus === 'success' ? 'border-teal-500/30 bg-teal-500/10 text-teal-200' : syncStatus === 'error' ? 'border-red-500/30 bg-red-500/10 text-red-200' : 'border-white/10 bg-black/20 text-slate-300'}`}>
+              {syncMessage}
+            </div>
+          )}
+          <p className="mt-4 text-xs leading-5 text-slate-500">
+            This sends your logged-in ChatGPT cookies and session storage from Electron to your remote Docker server so it can execute prompts on your behalf without manual browser re-login.
+          </p>
         </SettingSection>
       );
     }

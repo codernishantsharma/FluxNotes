@@ -14,6 +14,7 @@ import { processAiPrompt } from './ai';
 import { AIProvider, ChatSession } from './types';
 import { getApiToken, startApiServer, stopApiServer } from './api';
 import { configureNgrok, getNgrokSettings, startNgrok, stopNgrok } from './ngrok';
+import { WebSocket } from 'ws';
 
 const sessionState: {
   pendingChatUrl: string | null;
@@ -45,6 +46,84 @@ ipcMain.handle('configure-ngrok', async (_event, token: string, port: number, do
     return { success: true, ...(await getNgrokSettings()) };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
+
+ipcMain.handle('sync-session-to-server', async (_event, serverUrl: string, password: string) => {
+  const workerWindow = getWorkerWindow();
+  if (!workerWindow || workerWindow.isDestroyed()) {
+    return { success: false, error: 'Worker window is not available.' };
+  }
+
+  try {
+    const ses = workerWindow.webContents.session;
+    const cookies1 = await ses.cookies.get({ domain: 'chatgpt.com' });
+    const cookies2 = await ses.cookies.get({ domain: '.chatgpt.com' });
+    const cookieMap = new Map();
+    for (const c of [...cookies1, ...cookies2]) {
+      cookieMap.set(`${c.name}:${c.domain}:${c.path}`, c);
+    }
+    const cookies = Array.from(cookieMap.values());
+
+    let localStorageData: Record<string, string> = {};
+    try {
+      const rawLs = await workerWindow.webContents.executeJavaScript('JSON.stringify(localStorage)');
+      if (rawLs) localStorageData = JSON.parse(rawLs);
+    } catch (_) {}
+
+    const userAgent = workerWindow.webContents.getUserAgent();
+
+    let targetWsUrl = (serverUrl || '').trim();
+    if (!targetWsUrl.startsWith('ws://') && !targetWsUrl.startsWith('wss://')) {
+      if (targetWsUrl.startsWith('http://')) targetWsUrl = targetWsUrl.replace(/^http:\/\//, 'ws://');
+      else if (targetWsUrl.startsWith('https://')) targetWsUrl = targetWsUrl.replace(/^https:\/\//, 'wss://');
+      else targetWsUrl = `wss://${targetWsUrl}`;
+    }
+    if (!targetWsUrl.endsWith('/ws/api')) {
+      targetWsUrl = targetWsUrl.replace(/\/$/, '') + '/ws/api';
+    }
+
+    return await new Promise<{ success: boolean; loggedIn?: boolean; error?: string }>((resolve) => {
+      const ws = new WebSocket(targetWsUrl);
+      const timeout = setTimeout(() => {
+        try { ws.close(); } catch (_) {}
+        resolve({ success: false, error: 'Connection to server timed out.' });
+      }, 20000);
+
+      ws.on('open', () => {
+        ws.send(JSON.stringify({
+          type: 'sync_session',
+          password,
+          cookies,
+          localStorage: localStorageData,
+          userAgent,
+        }));
+      });
+
+      ws.on('message', (raw) => {
+        clearTimeout(timeout);
+        try {
+          const msg = JSON.parse(raw.toString());
+          if (msg.type === 'session_synced') {
+            ws.close();
+            resolve({ success: true, loggedIn: msg.loggedIn });
+          } else if (msg.type === 'error') {
+            ws.close();
+            resolve({ success: false, error: msg.message || msg.code || 'Sync failed.' });
+          }
+        } catch (_) {
+          ws.close();
+          resolve({ success: false, error: 'Failed to parse response from server.' });
+        }
+      });
+
+      ws.on('error', (err) => {
+        clearTimeout(timeout);
+        resolve({ success: false, error: err && err.message ? err.message : 'WebSocket error connecting to server.' });
+      });
+    });
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
   }
 });
 

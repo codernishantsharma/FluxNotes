@@ -5,6 +5,7 @@ const path = require('path');
 const os = require('os');
 const { WebSocketServer } = require('ws');
 const puppeteer = require('puppeteer-core');
+const crypto = require('crypto');
 
 const PORT = Number(process.env.PORT || 8787);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -15,10 +16,9 @@ const VIEW_QUALITY = Math.max(20, Math.min(100, Number(process.env.VIEW_QUALITY 
 const VIEW_WIDTH = Number(process.env.VIEW_WIDTH || 1280);
 const VIEW_HEIGHT = Number(process.env.VIEW_HEIGHT || 800);
 const API_TOKEN = (process.env.API_TOKEN || '').trim();
+const DESKTOP_CONNECT_PASSWORD = (process.env.DESKTOP_CONNECT_PASSWORD || API_TOKEN || crypto.randomBytes(8).toString('hex')).trim();
 const LOG_RESPONSES = !['0', 'false', 'off', 'no'].includes((process.env.LOG_RESPONSES || 'true').toLowerCase());
 const LOG_DIR = process.env.LOG_DIR || path.join(__dirname, 'logs');
-const PROMPT_FILE = process.env.PROMPT_FILE || path.join(__dirname, '..', 'prompt.md');
-
 const FRAME_INTERVAL_MS = Math.round(1000 / VIEW_FPS);
 
 fs.mkdirSync(USER_DATA_DIR, { recursive: true });
@@ -36,28 +36,35 @@ const viewSockets = new Set();
 let screencastRunning = false;
 
 function loadEngineScript() {
-  try {
-    const scriptPath = path.join(__dirname, '..', 'electron', 'chatgpt-engine.js');
-    return fs.readFileSync(scriptPath, 'utf8');
-  } catch (err) {
-    console.error('[SERVER] Failed to load chatgpt-engine.js:', err.message);
+  const candidates = [
+    path.join(__dirname, 'chatgpt-engine.js'),
+    path.join(__dirname, '..', 'electron', 'chatgpt-engine.js'),
+  ];
+  for (const scriptPath of candidates) {
     try {
-      return fs.readFileSync(path.join(__dirname, 'chatgpt-engine.js'), 'utf8');
-    } catch (e2) {
-      console.error('[SERVER] Failed to load fallback engine script:', e2.message);
-      return '';
-    }
+      if (fs.existsSync(scriptPath)) {
+        return fs.readFileSync(scriptPath, 'utf8');
+      }
+    } catch (_) {}
   }
+  console.error('[SERVER] Failed to load chatgpt-engine.js from candidates:', candidates);
+  return '';
 }
 
 function loadSystemPrompt() {
-  try {
-    if (fs.existsSync(PROMPT_FILE)) {
-      return fs.readFileSync(PROMPT_FILE, 'utf8');
-    }
-  } catch (err) {
-    console.warn('[SERVER] Could not load prompt.md:', err.message);
+  const candidates = [
+    process.env.PROMPT_FILE,
+    path.join(__dirname, 'prompt.md'),
+    path.join(__dirname, '..', 'prompt.md'),
+  ].filter(Boolean);
+  for (const promptPath of candidates) {
+    try {
+      if (fs.existsSync(promptPath)) {
+        return fs.readFileSync(promptPath, 'utf8');
+      }
+    } catch (_) {}
   }
+  console.warn('[SERVER] Could not load prompt.md');
   return '';
 }
 
@@ -859,6 +866,67 @@ wssApi.on('connection', (ws, req) => {
       return;
     }
 
+    if (msg.type === 'sync_session') {
+      const reqPassword = String(msg.password || '').trim();
+      const isValidPassword = (Boolean(reqPassword) && reqPassword === DESKTOP_CONNECT_PASSWORD) || (Boolean(API_TOKEN) && reqPassword === API_TOKEN);
+      if (!isValidPassword) {
+        sendWs(ws, { type: 'error', code: 'AUTH_FAILED', message: 'Invalid desktop connect password.' });
+        return;
+      }
+      const cookies = Array.isArray(msg.cookies) ? msg.cookies : [];
+      const localStorageData = msg.localStorage && typeof msg.localStorage === 'object' ? msg.localStorage : null;
+      const userAgent = typeof msg.userAgent === 'string' ? msg.userAgent : null;
+
+      try {
+        if (page && !page.isClosed()) {
+          if (userAgent) {
+            await page.setUserAgent(userAgent).catch(() => {});
+          }
+          if (cookies.length > 0) {
+            const puppeteerCookies = cookies.map(c => {
+              const cookie = {
+                name: String(c.name || ''),
+                value: String(c.value || ''),
+                domain: String(c.domain || '.chatgpt.com'),
+                path: String(c.path || '/'),
+                httpOnly: Boolean(c.httpOnly),
+                secure: Boolean(c.secure),
+              };
+              if (typeof c.expirationDate === 'number') cookie.expires = c.expirationDate;
+              if (c.sameSite) {
+                const ss = String(c.sameSite).toLowerCase();
+                if (ss.includes('no_restriction') || ss.includes('none')) cookie.sameSite = 'None';
+                else if (ss.includes('lax')) cookie.sameSite = 'Lax';
+                else if (ss.includes('strict')) cookie.sameSite = 'Strict';
+              }
+              return cookie;
+            }).filter(c => c.name && c.value);
+            await page.setCookie(...puppeteerCookies).catch(err => {
+              console.warn('[SERVER] setCookie warning:', err.message);
+            });
+          }
+          if (localStorageData) {
+            await page.goto(CHATGPT_URL, { waitUntil: 'domcontentloaded' }).catch(() => {});
+            await page.evaluate((data) => {
+              for (const [k, v] of Object.entries(data)) {
+                try { localStorage.setItem(k, String(v)); } catch (_) {}
+              }
+            }, localStorageData).catch(() => {});
+          }
+          await page.goto(CHATGPT_URL, { waitUntil: 'domcontentloaded' }).catch(() => {});
+          await injectEngineIfNeeded().catch(() => {});
+          const status = await checkLoginStatus();
+          isLoggedIn = status.loggedIn;
+          sendWs(ws, { type: 'session_synced', ok: true, loggedIn: isLoggedIn, url: page.url() });
+        } else {
+          sendWs(ws, { type: 'error', code: 'NO_BROWSER', message: 'Browser page unavailable.' });
+        }
+      } catch (syncErr) {
+        sendWs(ws, { type: 'error', code: 'SYNC_FAILED', message: syncErr && syncErr.message ? syncErr.message : String(syncErr) });
+      }
+      return;
+    }
+
     if (msg.type === 'ping') { sendWs(ws, { type: 'pong', timestamp: Date.now() }); return; }
     if (msg.type === 'auth') {
       if (authorized(msg.apiToken)) {
@@ -979,6 +1047,9 @@ process.once('SIGTERM', shutdown);
     server.listen(PORT, HOST, () => resolve());
   });
 
+  console.log('==================================================');
+  console.log(`[SERVER] DESKTOP CONNECT PASSWORD: ${DESKTOP_CONNECT_PASSWORD}`);
+  console.log('==================================================');
   console.log(`[SERVER] HTTP listening on http://${HOST}:${PORT}`);
   console.log(`[SERVER] MJPEG view: http://${HOST}:${PORT}/view (fallback)`);
   console.log(`[SERVER] CDP screencast view WS: ws://${HOST}:${PORT}/ws/view`);

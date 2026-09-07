@@ -34,4 +34,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getApiToken: () => ipcRenderer.invoke('get-api-token'),
   getNgrokSettings: () => ipcRenderer.invoke('get-ngrok-settings'),
   configureNgrok: (token: string, port: number, domain: string) => ipcRenderer.invoke('configure-ngrok', token, port, domain),
+  syncSessionToServer: (serverUrl: string, password: string) => ipcRenderer.invoke('sync-session-to-server', serverUrl, password),
 });
