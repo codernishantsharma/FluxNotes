@@ -14,7 +14,7 @@ jobs:
     name: Build Electron for ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: false # Prevents one OS failure from cancelling the others
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
@@ -90,7 +90,7 @@ jobs:
       - name: Sync Capacitor Android
         run: npx cap sync android
 
-      - name: Configure Android signing
+      - name: Configure Android signing (use provided keystore OR generate a release signing key)
         id: signing
         run: |
           KEYSTORE_PATH="$GITHUB_WORKSPACE/android/signing-release.jks"
@@ -107,7 +107,7 @@ jobs:
           EOF
             echo "mode=official-release" >> "$GITHUB_OUTPUT"
           else
-            echo "Generating ephemeral release signing key"
+            echo "Generating ephemeral release signing key (installable on all Android devices)"
             keytool -genkeypair -v \
               -keystore "$KEYSTORE_PATH" \
               -storepass "fluxnotes-release-temp" \
@@ -136,7 +136,7 @@ jobs:
           chmod +x ./gradlew
           ./gradlew bundleRelease --no-daemon
 
-      - name: Build Debug APK
+      - name: Build Debug APK (for quick testing)
         run: |
           cd android
           chmod +x ./gradlew
@@ -144,8 +144,11 @@ jobs:
 
       - name: Verify APKs are signed & installable
         run: |
+          # Use apksigner / zipalign from build tools
           BUILD_TOOLS=$(ls -d $ANDROID_SDK_ROOT/build-tools/* | sort -V | tail -n1)
+          echo "Using build-tools: $BUILD_TOOLS"
           export PATH=$BUILD_TOOLS:$PATH
+
           mkdir -p android-artifacts
           TAG=${GITHUB_REF_NAME:-latest}
 
@@ -153,10 +156,18 @@ jobs:
           cp android/app/build/outputs/apk/debug/app-debug.apk "android-artifacts/FluxNotes-${TAG}-debug.apk"
           cp android/app/build/outputs/bundle/release/app-release.aab "android-artifacts/FluxNotes-${TAG}-release.aab"
 
+          echo "--- Release APK signing info ---"
           apksigner verify --print-certs "android-artifacts/FluxNotes-${TAG}-release.apk" || true
+
+          echo "--- Debug APK signing info ---"
           apksigner verify --print-certs "android-artifacts/FluxNotes-${TAG}-debug.apk" || true
 
           echo "Signing mode used: ${{ steps.signing.outputs.mode }}" > android-artifacts/SIGNING-INFO.txt
+          echo "" >> android-artifacts/SIGNING-INFO.txt
+          echo "Release APK installable on any Android device (signed with ${{ steps.signing.outputs.mode }} key)." >> android-artifacts/SIGNING-INFO.txt
+          echo "For Play Store upload, use the .aab file. If you have an official upload key, add the ANDROID_* GitHub Secrets." >> android-artifacts/SIGNING-INFO.txt
+
+          ls -lh android-artifacts/
 
       - name: Upload Android Release Artifacts
         if: always()
@@ -186,12 +197,12 @@ jobs:
       - name: Sync Capacitor iOS
         run: npx cap sync ios
 
-      - name: Show environment info
+      - name: Show environment info (Xcode, SDKs)
         run: |
           xcodebuild -version
           xcodebuild -showsdks 2>&1 | head -30 || true
 
-      - name: Import iOS code signing
+      - name: Import iOS code signing (if secrets provided)
         id: ios_signing
         env:
           IOS_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
@@ -201,6 +212,8 @@ jobs:
           IOS_P12_PASSWORD: ${{ secrets.IOS_P12_PASSWORD }}
         run: |
           if [ -n "$IOS_P12_BASE64" ] && [ -n "$IOS_TEAM_ID" ]; then
+            echo "Apple Developer secrets detected, configuring signing"
+
             KEYCHAIN=build.keychain-db
             KEYCHAIN_PASSWORD="ci-build-pass-$RANDOM"
             security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN
@@ -217,17 +230,22 @@ jobs:
               echo "$IOS_PROVISIONING_PROFILE_BASE64" | base64 -d > /tmp/profile.mobileprovision
               UUID=$(/usr/libexec/PlistBuddy -c 'Print :UUID' /dev/stdin <<< "$(security cms -D -i /tmp/profile.mobileprovision)")
               cp /tmp/profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/${UUID}.mobileprovision
+              echo "Installed profile UUID=$UUID"
             fi
+
             echo "configured=true" >> "$GITHUB_OUTPUT"
           else
+            echo "No Apple Developer secrets provided — will build unsigned release archive + simulator app"
             echo "configured=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Resolve effective Team ID
+      - name: Resolve effective Team ID for exportOptions.plist
         id: team_id
         run: |
           TEAM_ID="${{ secrets.IOS_TEAM_ID }}"
-          if [ -z "$TEAM_ID" ]; then TEAM_ID="PLACEHOLDER"; fi
+          if [ -z "$TEAM_ID" ]; then
+            TEAM_ID="PLACEHOLDER"
+          fi
           echo "team_id=$TEAM_ID" >> "$GITHUB_OUTPUT"
 
       - name: Write exportOptions.plist
@@ -253,51 +271,110 @@ jobs:
           </plist>
           PLIST
 
-      - name: Build iOS Device Release XCArchive
+      - name: Build iOS Device Release XCArchive (iPhone/iPad)
         run: |
           cd ios/App
           mkdir -p build
+
           if [ "${{ steps.ios_signing.outputs.configured }}" = "true" ]; then
-            xcodebuild -scheme App -workspace App.xcworkspace -configuration Release -sdk iphoneos -archivePath build/App.xcarchive -allowProvisioningUpdates clean archive
+            echo "Building signed device archive"
+            xcodebuild \
+              -scheme App \
+              -workspace App.xcworkspace \
+              -configuration Release \
+              -sdk iphoneos \
+              -archivePath build/App.xcarchive \
+              -allowProvisioningUpdates \
+              clean archive
           else
-            xcodebuild -scheme App -workspace App.xcworkspace -configuration Release -sdk iphoneos -archivePath build/App.xcarchive clean archive CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGNING_IDENTITY="" EXPAND_CODE_SIGN_VARIABLES=YES || true
+            echo "Building unsigned device archive (no signing — import into Xcode on a Mac to sign & export)"
+            xcodebuild \
+              -scheme App \
+              -workspace App.xcworkspace \
+              -configuration Release \
+              -sdk iphoneos \
+              -archivePath build/App.xcarchive \
+              clean archive \
+              CODE_SIGNING_ALLOWED=NO \
+              CODE_SIGNING_REQUIRED=NO \
+              CODE_SIGNING_IDENTITY="" \
+              EXPAND_CODE_SIGN_VARIABLES=YES || true
           fi
 
-      - name: Export IPA
+      - name: Export IPA (if signing configured)
         id: export_ipa
         if: steps.ios_signing.outputs.configured == 'true'
         run: |
           cd ios/App
-          xcodebuild -exportArchive -archivePath build/App.xcarchive -exportOptionsPlist exportOptions.plist -exportPath build/export -allowProvisioningUpdates
+          xcodebuild \
+            -exportArchive \
+            -archivePath build/App.xcarchive \
+            -exportOptionsPlist exportOptions.plist \
+            -exportPath build/export \
+            -allowProvisioningUpdates
           echo "done=true" >> "$GITHUB_OUTPUT"
 
-      - name: Also build iOS Simulator .app
+      - name: Also build iOS Simulator .app (always works, no signing needed)
         run: |
           cd ios/App
-          xcodebuild -scheme App -workspace App.xcworkspace -configuration Release -sdk iphonesimulator -derivedDataPath build/sim-derive -quiet build CODE_SIGNING_ALLOWED=NO || true
+          xcodebuild \
+            -scheme App \
+            -workspace App.xcworkspace \
+            -configuration Release \
+            -sdk iphonesimulator \
+            -derivedDataPath build/sim-derive \
+            -quiet \
+            build CODE_SIGNING_ALLOWED=NO || true
           SIM_APP_PATH=$(find build/sim-derive/Build/Products -name "App.app" -type d 2>/dev/null | head -n1)
-          if [ -n "$SIM_APP_PATH" ]; then cp -R "$SIM_APP_PATH" "build/FluxNotes-Simulator.app"; fi
+          echo "Found simulator app at: $SIM_APP_PATH"
+          if [ -n "$SIM_APP_PATH" ]; then
+            cp -R "$SIM_APP_PATH" "build/FluxNotes-Simulator.app"
+          fi
 
       - name: Collect & package all iOS outputs
         run: |
           TAG=${GITHUB_REF_NAME:-latest}
           mkdir -p ios-artifacts
 
+          echo "=== Packaging iOS artifacts for tag: $TAG ==="
+
           if [ -d "ios/App/build/App.xcarchive" ]; then
+            echo "Packaging XCArchive..."
             cd ios/App/build
             zip -rq "${GITHUB_WORKSPACE}/ios-artifacts/FluxNotes-${TAG}-Device.xcarchive.zip" App.xcarchive
             cd "${GITHUB_WORKSPACE}"
           fi
 
           if [ "${{ steps.export_ipa.outputs.done }}" = "true" ] && ls ios/App/build/export/*.ipa 1>/dev/null 2>&1; then
+            echo "Packaging signed IPA..."
             cp ios/App/build/export/*.ipa "ios-artifacts/FluxNotes-${TAG}-release.ipa"
           fi
 
           if [ -d "ios/App/build/FluxNotes-Simulator.app" ]; then
+            echo "Packaging Simulator .app..."
             cd ios/App/build
             zip -rq "${GITHUB_WORKSPACE}/ios-artifacts/FluxNotes-${TAG}-Simulator.app.zip" FluxNotes-Simulator.app
             cd "${GITHUB_WORKSPACE}"
           fi
+
+          cat > ios-artifacts/README-IOS.txt <<EOF
+          FluxNotes iOS Build — tag ${TAG}
+          ===============================
+
+          1) FluxNotes-${TAG}-Device.xcarchive.zip
+             • Unzip on a Mac with Xcode installed.
+             • Double-click to open in Xcode Organizer automatically.
+             • Click "Distribute App" → choose App Store Connect or "Ad Hoc".
+             • Choose "Automatically manage signing" + your Apple Developer team.
+
+          2) FluxNotes-${TAG}-release.ipa (ONLY IF SECRETS WERE ADDED)
+             • Fully signed & exported IPA ready for App Store Connect.
+
+          3) FluxNotes-${TAG}-Simulator.app.zip
+             • NO SIGNING NEEDED. Drag the .app into a running iOS Simulator.
+
+          Signing mode: ${{ steps.ios_signing.outputs.configured == 'true' && 'Apple Developer-signed' || 'Unsigned' }}
+          EOF
 
       - name: Upload iOS Release Artifacts
         if: always()
@@ -307,11 +384,14 @@ jobs:
           path: ios-artifacts/
 
   build-docker:
-    name: Build & Push Docker Image
+    name: Build & Push Docker Image (GHCR & DockerHub)
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+    env:
+      DOCKER_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKER_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
     steps:
       - name: Check out code
         uses: actions/checkout@v4
@@ -326,20 +406,20 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Log in to DockerHub
-        if: secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != ''
+      - name: Log in to DockerHub (if credentials provided)
+        if: env.DOCKER_USER != '' && env.DOCKER_TOKEN != ''
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Extract metadata
+      - name: Extract metadata (tags, labels)
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: |
             ghcr.io/${{ github.repository }}/fluxnotes-server
-            ${{ secrets.DOCKERHUB_USERNAME != '' && format('{0}/fluxnotes-server', secrets.DOCKERHUB_USERNAME) || '' }}
+            ${{ env.DOCKER_USER != '' && format('{0}/fluxnotes-server', env.DOCKER_USER) || '' }}
           tags: |
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' }}
             type=semver,pattern={{version}}
@@ -356,7 +436,7 @@ jobs:
 
   release:
     needs: [build-electron, build-android, build-ios, build-docker]
-    if: ${{ !cancelled() }} # Allows release to run even if some build jobs failed
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - name: Download all workflow artifacts
@@ -364,6 +444,9 @@ jobs:
         with:
           path: all-dist
           merge-multiple: true
+
+      - name: List everything being released
+        run: find all-dist -maxdepth 3 -type f | sort
 
       - name: Create GitHub Release and Upload All Assets
         if: startsWith(github.ref, 'refs/tags/v')
@@ -373,23 +456,28 @@ jobs:
           fail_on_unmatched_files: false
           body: |
             ## FluxNotes ${{ github.ref_name }}
-            See README-IOS.txt and SIGNING-INFO.txt for per-artifact details.
+
+            ### 🤖 Android
+            - **`FluxNotes-${{ github.ref_name }}-release.apk`** — Installable release build for any Android device.
+            - **`FluxNotes-${{ github.ref_name }}-release.aab`** — App Bundle for Google Play Store upload.
+            - **`FluxNotes-${{ github.ref_name }}-debug.apk`** — Debug build for quick testing.
+
+            ### 🍎 iOS
+            - **`FluxNotes-${{ github.ref_name }}-Device.xcarchive.zip`** — Open on a Mac in Xcode to produce a signed IPA.
+            - **`FluxNotes-${{ github.ref_name }}-Simulator.app.zip`** — Drag into any iOS Simulator.
+            - **`FluxNotes-${{ github.ref_name }}-release.ipa`** — *(Only if Apple Developer secrets configured)* Fully signed IPA.
+
+            See `README-IOS.txt` and `SIGNING-INFO.txt` for details.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   update-apt-repo:
     needs: release
-    if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v') }} # Ensures it runs even if release partially fails
+    if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
         uses: actions/checkout@v4
-
-      - name: Download all workflow artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: all-dist
-          merge-multiple: true
 
       - name: Set up Git Identity
         run: |
@@ -401,6 +489,12 @@ jobs:
         with:
           gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
           passphrase: ${{ secrets.GPG_PASSPHRASE }}
+
+      - name: Download all workflow artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: all-dist
+          merge-multiple: true
 
       - name: Generate APT Metadata
         run: |
