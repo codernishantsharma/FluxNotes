@@ -17,8 +17,6 @@ const VIEW_HEIGHT = Number(process.env.VIEW_HEIGHT || 800);
 const API_TOKEN = (process.env.API_TOKEN || '').trim();
 const LOG_RESPONSES = !['0', 'false', 'off', 'no'].includes((process.env.LOG_RESPONSES || 'true').toLowerCase());
 const LOG_DIR = process.env.LOG_DIR || path.join(__dirname, 'logs');
-const PROMPT_FILE = process.env.PROMPT_FILE || path.join(__dirname, '..', 'prompt.md');
-
 const FRAME_INTERVAL_MS = Math.round(1000 / VIEW_FPS);
 
 fs.mkdirSync(USER_DATA_DIR, { recursive: true });
@@ -36,28 +34,35 @@ const viewSockets = new Set();
 let screencastRunning = false;
 
 function loadEngineScript() {
-  try {
-    const scriptPath = path.join(__dirname, '..', 'electron', 'chatgpt-engine.js');
-    return fs.readFileSync(scriptPath, 'utf8');
-  } catch (err) {
-    console.error('[SERVER] Failed to load chatgpt-engine.js:', err.message);
+  const candidates = [
+    path.join(__dirname, 'chatgpt-engine.js'),
+    path.join(__dirname, '..', 'electron', 'chatgpt-engine.js'),
+  ];
+  for (const scriptPath of candidates) {
     try {
-      return fs.readFileSync(path.join(__dirname, 'chatgpt-engine.js'), 'utf8');
-    } catch (e2) {
-      console.error('[SERVER] Failed to load fallback engine script:', e2.message);
-      return '';
-    }
+      if (fs.existsSync(scriptPath)) {
+        return fs.readFileSync(scriptPath, 'utf8');
+      }
+    } catch (_) {}
   }
+  console.error('[SERVER] Failed to load chatgpt-engine.js from candidates:', candidates);
+  return '';
 }
 
 function loadSystemPrompt() {
-  try {
-    if (fs.existsSync(PROMPT_FILE)) {
-      return fs.readFileSync(PROMPT_FILE, 'utf8');
-    }
-  } catch (err) {
-    console.warn('[SERVER] Could not load prompt.md:', err.message);
+  const candidates = [
+    process.env.PROMPT_FILE,
+    path.join(__dirname, 'prompt.md'),
+    path.join(__dirname, '..', 'prompt.md'),
+  ].filter(Boolean);
+  for (const promptPath of candidates) {
+    try {
+      if (fs.existsSync(promptPath)) {
+        return fs.readFileSync(promptPath, 'utf8');
+      }
+    } catch (_) {}
   }
+  console.warn('[SERVER] Could not load prompt.md');
   return '';
 }
 

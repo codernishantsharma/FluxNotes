@@ -10,14 +10,7 @@ export default function AndroidEntryPage() {
   const [message, setMessage] = useState('Preparing camera scanner...');
   const [isScanning, setIsScanning] = useState(false);
 
-  useEffect(() => {
-    void getMobileValue(mobileKeys.hostUrl).then((hostUrl) => {
-      if (hostUrl) router.replace('/android/dashboard');
-      else void startScan();
-    });
-  }, [router]);
-
-  const startScan = async () => {
+  const startScan = React.useCallback(async () => {
     setIsScanning(true);
     setMessage('Point your camera at the FluxNotes QR code.');
     try {
@@ -45,7 +38,14 @@ export default function AndroidEntryPage() {
     } finally {
       setIsScanning(false);
     }
-  };
+  }, [router]);
+
+  useEffect(() => {
+    void getMobileValue(mobileKeys.hostUrl).then((hostUrl) => {
+      if (hostUrl) router.replace('/android/dashboard');
+      else void startScan();
+    });
+  }, [router, startScan]);
 
   return (
     <main className="min-h-dvh bg-[#091012] px-5 py-8 text-slate-100">

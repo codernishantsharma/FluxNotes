@@ -56,6 +56,7 @@ You can export your generated notes as:
 ```text
 .
 ├── app/              # Frontend screens and pages
+├── docker-server/    # Standalone Docker & Render server implementation
 ├── electron/         # Electron app logic and worker bridge
 ├── icons/            # App icons
 ├── public/           # Static assets
@@ -182,6 +183,13 @@ The app is configured to build desktop app packages for:
 - macOS: DMG
 
 These are the actual package formats from the current Electron config in [package.json](package.json).
+
+### Docker & Render Server Hosting
+For hosting FluxNotes remotely (e.g. on Render or inside Docker) without running the Electron desktop UI:
+- Navigate to `docker-server/` or see [docker-server/README.md](docker-server/README.md).
+- Run `docker compose up -d` locally or deploy using the included `docker-server/render.yaml` Blueprint on Render.
+- Open the live web browser view at `http://<host>:8787/` to log into `chatgpt.com`.
+- Connect your mobile app or client to `ws://<host>:8787/ws/api` (or `wss://...`).
 
 ### Developer notes
 - The app starts the Electron shell and then launches the Next.js UI.
