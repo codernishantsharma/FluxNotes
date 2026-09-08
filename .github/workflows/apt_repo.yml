@@ -1,0 +1,298 @@
+name: Generate and Update APT Repository
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to fetch .deb from (leave blank for latest)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  update-apt:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # ============================================================
+      # CHECKOUT
+      # ============================================================
+
+      - name: Check out code
+        uses: actions/checkout@v4
+
+
+      # ============================================================
+      # GIT IDENTITY
+      # ============================================================
+
+      - name: Set up Git Identity
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+
+      # ============================================================
+      # IMPORT GPG PRIVATE KEY
+      # ============================================================
+
+      - name: Import GPG Private Key
+        uses: crazy-max/ghaction-import-gpg@v6
+        with:
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.GPG_PASSPHRASE }}
+
+
+      # ============================================================
+      # INSTALL APT TOOLS
+      # ============================================================
+
+      - name: Install APT Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dpkg-dev apt-utils
+
+
+      # ============================================================
+      # DETERMINE RELEASE TAG
+      # ============================================================
+
+      - name: Determine Release Tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+
+          INPUT_TAG="${{ github.event.inputs.tag }}"
+
+          if [ -z "$INPUT_TAG" ]; then
+            TAG="$(gh release view --json tagName --jq '.tagName')"
+          else
+            TAG="$INPUT_TAG"
+          fi
+
+          echo "Using release tag: $TAG"
+
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+
+
+      # ============================================================
+      # DOWNLOAD DEB TEMPORARILY
+      #
+      # The .deb stays on the GitHub Release.
+      # It is downloaded only temporarily so dpkg-scanpackages
+      # can inspect it.
+      # ============================================================
+
+      - name: Download .deb from GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+
+          mkdir -p all-dist
+
+          echo "Downloading .deb from release: $TAG"
+
+          gh release download "$TAG" \
+            --pattern "*_amd64.deb" \
+            --dir all-dist \
+            || gh release download "$TAG" \
+            --pattern "*.deb" \
+            --dir all-dist
+
+          echo ""
+          echo "Downloaded packages:"
+
+          find all-dist \
+            -type f \
+            -name "*.deb" \
+            -printf '%f\n'
+
+
+      # ============================================================
+      # GENERATE APT METADATA
+      # ============================================================
+
+      - name: Generate APT Metadata
+        env:
+
+          # IMPORTANT:
+          # Replace this with your NEW GPG key ID.
+          #
+          # Example:
+          # GPG_KEY_ID: "1234567890ABCDEF"
+          #
+          GPG_KEY_ID: "YOUR_NEW_KEY_ID"
+
+          # Your GPG key is passphrase protected.
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+        run: |
+          set -e
+
+          echo "Creating APT repository structure..."
+
+          mkdir -p repo/pool/main
+          mkdir -p repo/dists/stable/main/binary-amd64
+
+
+          # ========================================================
+          # COPY DEB TEMPORARILY
+          #
+          # This is only required by dpkg-scanpackages.
+          # It will NOT be pushed to gh-pages.
+          # ========================================================
+
+          find all-dist \
+            -type f \
+            -name "*.deb" \
+            -exec cp {} repo/pool/main/ \;
+
+
+          cd repo
+
+
+          # ========================================================
+          # GENERATE PACKAGES
+          # ========================================================
+
+          echo "Generating Packages..."
+
+          dpkg-scanpackages \
+            pool/main \
+            /dev/null \
+            > dists/stable/main/binary-amd64/Packages
+
+
+          # ========================================================
+          # GET GITHUB RELEASE ASSET URLS
+          # ========================================================
+
+          echo "Getting GitHub Release asset URLs..."
+
+          gh release view "$TAG" \
+            --json assets \
+            > /tmp/release-assets.json
+
+
+          # ========================================================
+          # REPLACE Filename:
+          #
+          # dpkg-scanpackages creates:
+          #
+          # Filename: pool/main/fluxnotes_0.2.4_amd64.deb
+          #
+          # We replace it with the GitHub Release URL.
+          # ========================================================
+
+          python3 <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          packages_file = Path(
+              "dists/stable/main/binary-amd64/Packages"
+          )
+
+          release_data = json.loads(
+              Path("/tmp/release-assets.json").read_text()
+          )
+
+          assets = release_data["assets"]
+
+          deb_assets = {}
+
+          for asset in assets:
+              name = asset["name"]
+
+              if name.endswith(".deb"):
+                  deb_assets[name] = asset["browserDownloadUrl"]
+
+          if not deb_assets:
+              raise SystemExit(
+                  "ERROR: No .deb asset found in GitHub Release."
+              )
+
+          print("Found Debian assets:")
+
+          for name, url in deb_assets.items():
+              print(f"  {name}")
+              print(f"  {url}")
+
+
+          text = packages_file.read_text()
+
+
+          def replace_filename(match):
+              old_filename = match.group(1).strip()
+
+              filename = os.path.basename(old_filename)
+
+              if filename not in deb_assets:
+                  raise SystemExit(
+                      f"ERROR: No Release asset found for: {filename}"
+                  )
+
+              return f"Filename: {deb_assets[filename]}"
+
+
+          text = re.sub(
+              r"^Filename:\s*(.+)$",
+              replace_filename,
+              text,
+              flags=re.MULTILINE
+          )
+
+
+          packages_file.write_text(text)
+
+
+          print("")
+          print("Updated Packages file:")
+          print(text)
+
+          PY
+
+
+          # ========================================================
+          # COMPRESS PACKAGES
+          # ========================================================
+
+          echo "Compressing Packages..."
+
+          gzip -kf \
+            dists/stable/main/binary-amd64/Packages
+
+
+          # ========================================================
+          # GENERATE RELEASE
+          # ========================================================
+
+          echo "Generating Release..."
+
+          apt-ftparchive release dists/stable/ \
+            > dists/stable/Release
+
+
+          cd dists/stable
+
+
+          # ========================================================
+          # CONFIGURE GPG
+          # ========================================================
+
+          echo "Configuring GPG..."
+
+          mkdir -p "$HOME/.gnupg"
+          chmod 700 "$HOME/.gnupg"
+
+          cat > "$HOME/.gnupg/gpg.conf" <<'EOF'
+          batch
+         
