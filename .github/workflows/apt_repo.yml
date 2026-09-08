@@ -36,7 +36,7 @@ jobs:
 
 
       # ============================================================
-      # IMPORT GPG PRIVATE KEY
+      # IMPORT EXISTING GPG PRIVATE KEY
       # ============================================================
 
       - name: Import GPG Private Key
@@ -81,10 +81,6 @@ jobs:
 
       # ============================================================
       # DOWNLOAD DEB TEMPORARILY
-      #
-      # The .deb stays on the GitHub Release.
-      # It is downloaded only temporarily so dpkg-scanpackages
-      # can inspect it.
       # ============================================================
 
       - name: Download .deb from GitHub Release
@@ -120,18 +116,15 @@ jobs:
       - name: Generate APT Metadata
         env:
 
-          # IMPORTANT:
-          # Replace this with your NEW GPG key ID.
-          #
-          # Example:
-          # GPG_KEY_ID: "1234567890ABCDEF"
-          #
-          GPG_KEY_ID: "YOUR_NEW_KEY_ID"
+          # YOUR EXISTING GPG KEY
+          GPG_KEY_ID: "DD3569D42FE4D492"
 
-          # Your GPG key is passphrase protected.
+          # YOUR EXISTING GPG PASSPHRASE
           GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
 
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+          GITHUB_REPOSITORY: ${{ github.repository }}
 
         run: |
           set -e
@@ -144,9 +137,6 @@ jobs:
 
           # ========================================================
           # COPY DEB TEMPORARILY
-          #
-          # This is only required by dpkg-scanpackages.
-          # It will NOT be pushed to gh-pages.
           # ========================================================
 
           find all-dist \
@@ -171,29 +161,42 @@ jobs:
 
 
           # ========================================================
-          # GET GITHUB RELEASE ASSET URLS
+          # FIND DEB FILE
           # ========================================================
 
-          echo "Getting GitHub Release asset URLs..."
+          DEB_FILE="$(
+            find pool/main \
+              -maxdepth 1 \
+              -type f \
+              -name "*.deb" \
+              -printf '%f\n' \
+              | head -n 1
+          )"
 
-          gh release view "$TAG" \
-            --json assets \
-            > /tmp/release-assets.json
+          if [ -z "$DEB_FILE" ]; then
+            echo "ERROR: No .deb file found."
+            exit 1
+          fi
+
+          echo "DEB file: $DEB_FILE"
 
 
           # ========================================================
-          # REPLACE Filename:
-          #
-          # dpkg-scanpackages creates:
-          #
-          # Filename: pool/main/fluxnotes_0.2.4_amd64.deb
-          #
-          # We replace it with the GitHub Release URL.
+          # CONSTRUCT GITHUB RELEASE URL
           # ========================================================
 
-          python3 <<'PY'
-          import json
-          import os
+          RELEASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${DEB_FILE}"
+
+          echo ""
+          echo "Release download URL:"
+          echo "$RELEASE_URL"
+
+
+          # ========================================================
+          # UPDATE Filename FIELD
+          # ========================================================
+
+          python3 <<PY
           import re
           from pathlib import Path
 
@@ -201,63 +204,31 @@ jobs:
               "dists/stable/main/binary-amd64/Packages"
           )
 
-          release_data = json.loads(
-              Path("/tmp/release-assets.json").read_text()
-          )
-
-          assets = release_data["assets"]
-
-          deb_assets = {}
-
-          for asset in assets:
-              name = asset["name"]
-
-              if name.endswith(".deb"):
-                  deb_assets[name] = asset["browserDownloadUrl"]
-
-          if not deb_assets:
-              raise SystemExit(
-                  "ERROR: No .deb asset found in GitHub Release."
-              )
-
-          print("Found Debian assets:")
-
-          for name, url in deb_assets.items():
-              print(f"  {name}")
-              print(f"  {url}")
-
-
           text = packages_file.read_text()
 
+          release_url = "${RELEASE_URL}"
 
-          def replace_filename(match):
-              old_filename = match.group(1).strip()
-
-              filename = os.path.basename(old_filename)
-
-              if filename not in deb_assets:
-                  raise SystemExit(
-                      f"ERROR: No Release asset found for: {filename}"
-                  )
-
-              return f"Filename: {deb_assets[filename]}"
-
+          if not re.search(
+              r"^Filename:\s*.+$",
+              text,
+              flags=re.MULTILINE
+          ):
+              raise SystemExit(
+                  "ERROR: No Filename field found in Packages."
+              )
 
           text = re.sub(
-              r"^Filename:\s*(.+)$",
-              replace_filename,
+              r"^Filename:\s*.+$",
+              f"Filename: {release_url}",
               text,
               flags=re.MULTILINE
           )
 
-
           packages_file.write_text(text)
 
-
           print("")
-          print("Updated Packages file:")
+          print("Updated Packages:")
           print(text)
-
           PY
 
 
@@ -269,6 +240,15 @@ jobs:
 
           gzip -kf \
             dists/stable/main/binary-amd64/Packages
+
+
+          # ========================================================
+          # REMOVE DEB
+          #
+          # It remains on GitHub Releases.
+          # ========================================================
+
+          rm -rf pool
 
 
           # ========================================================
@@ -295,4 +275,186 @@ jobs:
 
           cat > "$HOME/.gnupg/gpg.conf" <<'EOF'
           batch
-         
+          pinentry-mode loopback
+          EOF
+
+          cat > "$HOME/.gnupg/gpg-agent.conf" <<'EOF'
+          allow-loopback-pinentry
+          EOF
+
+          gpgconf --kill gpg-agent || true
+
+
+          # ========================================================
+          # VERIFY EXISTING GPG KEY
+          # ========================================================
+
+          echo "Signing with GPG key: $GPG_KEY_ID"
+
+          gpg \
+            --batch \
+            --list-secret-keys \
+            --keyid-format LONG \
+            "$GPG_KEY_ID"
+
+
+          # ========================================================
+          # CREATE Release.gpg
+          # ========================================================
+
+          echo "Creating Release.gpg..."
+
+          gpg \
+            --batch \
+            --yes \
+            --pinentry-mode loopback \
+            --passphrase "$GPG_PASSPHRASE" \
+            --local-user "$GPG_KEY_ID" \
+            --armor \
+            --detach-sign \
+            --output Release.gpg \
+            Release
+
+
+          # ========================================================
+          # CREATE InRelease
+          # ========================================================
+
+          echo "Creating InRelease..."
+
+          gpg \
+            --batch \
+            --yes \
+            --pinentry-mode loopback \
+            --passphrase "$GPG_PASSPHRASE" \
+            --local-user "$GPG_KEY_ID" \
+            --clearsign \
+            --output InRelease \
+            Release
+
+
+          echo ""
+          echo "APT metadata generated successfully."
+
+
+      # ============================================================
+      # PUBLISH TO GH-PAGES
+      # ============================================================
+
+      - name: Publish APT Repository
+        run: |
+          set -e
+
+          echo "Preparing GitHub Pages repository..."
+
+
+          # ========================================================
+          # SAVE ONLY REPOSITORY METADATA
+          # ========================================================
+
+          TEMP_REPO="$(mktemp -d)"
+
+          cp -r repo/. "$TEMP_REPO/"
+
+
+          # ========================================================
+          # PUBLIC GPG KEY
+          # ========================================================
+
+          if [ -f public.key ]; then
+            cp public.key "$TEMP_REPO/public.key"
+          else
+            echo "WARNING: public.key not found."
+          fi
+
+
+          # ========================================================
+          # CNAME
+          # ========================================================
+
+          echo "repo.fluxnotes.nishantapps.in" \
+            > "$TEMP_REPO/CNAME"
+
+
+          # ========================================================
+          # DELETE TEMPORARY DEB
+          # ========================================================
+
+          rm -rf all-dist
+          rm -rf repo
+
+
+          # ========================================================
+          # SWITCH TO GH-PAGES
+          # ========================================================
+
+          git checkout --orphan gh-pages
+
+          git rm -rf . || true
+
+          git clean -fdx
+
+
+          # ========================================================
+          # COPY ONLY APT METADATA
+          # ========================================================
+
+          cp -r "$TEMP_REPO"/. .
+
+
+          # ========================================================
+          # SAFETY CHECK
+          # ========================================================
+
+          echo ""
+          echo "Checking for files larger than 100 MB..."
+
+          LARGE_FILES="$(
+            find . \
+              -type f \
+              -size +100M \
+              -not -path './.git/*'
+          )"
+
+          if [ -n "$LARGE_FILES" ]; then
+            echo ""
+            echo "ERROR: Large files detected:"
+            echo "$LARGE_FILES"
+            exit 1
+          fi
+
+
+          # ========================================================
+          # SHOW FILES
+          # ========================================================
+
+          echo ""
+          echo "Files being published:"
+
+          find . \
+            -type f \
+            -not -path './.git/*' \
+            -printf '%p (%s bytes)\n'
+
+
+          # ========================================================
+          # COMMIT
+          # ========================================================
+
+          git add .
+
+          git commit \
+            -m "Update APT repository for $TAG"
+
+
+          # ========================================================
+          # PUSH
+          # ========================================================
+
+          git push origin gh-pages --force
+
+
+          echo ""
+          echo "=========================================="
+          echo "APT repository published successfully!"
+          echo "=========================================="
