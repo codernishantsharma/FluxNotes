@@ -60,9 +60,9 @@ jobs:
           
           KEY_ID="$(gpg --list-secret-keys --with-colons | grep sec | head -n 1 | cut -d':' -f5)"
           
-          # Use loopback mode and pass the secret directly to bypass terminal prompt
-          gpg --default-key "$KEY_ID" --batch --yes --pinentry-mode loopback --passphrase "$GPG_PASS" -abs -o Release.gpg Release
-          gpg --default-key "$KEY_ID" --batch --yes --pinentry-mode loopback --passphrase "$GPG_PASS" --clearsign -o InRelease Release
+          # Use printf '%s' to avoid trailing newlines breaking the passphrase
+          printf '%s' "$GPG_PASS" | gpg --default-key "$KEY_ID" --batch --yes --pinentry-mode loopback --passphrase-fd 0 -abs -o Release.gpg Release
+          printf '%s' "$GPG_PASS" | gpg --default-key "$KEY_ID" --batch --yes --pinentry-mode loopback --passphrase-fd 0 --clearsign -o InRelease Release
 
       - name: Commit and Push to GitHub Pages Branch
         run: |
