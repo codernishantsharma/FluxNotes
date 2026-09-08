@@ -47,6 +47,8 @@ jobs:
           fi
 
       - name: Generate APT Metadata
+        env:
+          GPG_PASS: ${{ secrets.GPG_PASSPHRASE }}
         run: |
           mkdir -p repo/pool/main repo/dists/stable/main/binary-amd64
           find all-dist -name "*_amd64.deb" -exec cp {} repo/pool/main/ \; || true
@@ -57,8 +59,10 @@ jobs:
           cd dists/stable
           
           KEY_ID="$(gpg --list-secret-keys --with-colons | grep sec | head -n 1 | cut -d':' -f5)"
-          gpg --default-key "$KEY_ID" --batch --yes -abs -o Release.gpg Release
-          gpg --default-key "$KEY_ID" --batch --yes --clearsign -o InRelease Release
+          
+          # Use loopback mode and pass the secret directly to bypass terminal prompt
+          gpg --default-key "$KEY_ID" --batch --yes --pinentry-mode loopback --passphrase "$GPG_PASS" -abs -o Release.gpg Release
+          gpg --default-key "$KEY_ID" --batch --yes --pinentry-mode loopback --passphrase "$GPG_PASS" --clearsign -o InRelease Release
 
       - name: Commit and Push to GitHub Pages Branch
         run: |
@@ -70,4 +74,4 @@ jobs:
           git add .
           git commit -m "Manual APT repo update for ${{ github.event.inputs.tag || 'latest' }}"
           git push origin gh-pages --force
-
+          
