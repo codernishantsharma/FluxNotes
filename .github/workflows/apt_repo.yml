@@ -14,6 +14,7 @@ permissions:
 jobs:
   update-apt:
     runs-on: ubuntu-latest
+
     steps:
       - name: Check out code
         uses: actions/checkout@v4
@@ -24,54 +25,98 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Import GPG Key
+        id: import_gpg
         uses: crazy-max/ghaction-import-gpg@v6
         with:
           gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
           passphrase: ${{ secrets.GPG_PASSPHRASE }}
 
       - name: Install dpkg-dev and apt-utils
-        run: sudo apt-get update && sudo apt-get install -y dpkg-dev apt-utils
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dpkg-dev apt-utils
 
       - name: Download .deb from GitHub Releases
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p all-dist
+
           TAG="${{ github.event.inputs.tag }}"
+
           if [ -z "$TAG" ]; then
             echo "Fetching assets from the latest release..."
-            gh release download --pattern "*_amd64.deb" --dir all-dist || gh release download --pattern "*.deb" --dir all-dist
+            gh release download \
+              --pattern "*_amd64.deb" \
+              --dir all-dist \
+              || gh release download \
+              --pattern "*.deb" \
+              --dir all-dist
           else
             echo "Fetching assets from release tag: $TAG"
-            gh release download "$TAG" --pattern "*_amd64.deb" --dir all-dist || gh release download "$TAG" --pattern "*.deb" --dir all-dist
+            gh release download "$TAG" \
+              --pattern "*_amd64.deb" \
+              --dir all-dist \
+              || gh release download "$TAG" \
+              --pattern "*.deb" \
+              --dir all-dist
           fi
 
       - name: Generate APT Metadata
         env:
-          GPG_PASS: ${{ secrets.GPG_PASSPHRASE }}
+          GPG_KEY_ID: ${{ steps.import_gpg.outputs.keyid }}
         run: |
-          mkdir -p repo/pool/main repo/dists/stable/main/binary-amd64
-          find all-dist -name "*_amd64.deb" -exec cp {} repo/pool/main/ \; || true
+          set -e
+
+          mkdir -p repo/pool/main
+          mkdir -p repo/dists/stable/main/binary-amd64
+
+          find all-dist -name "*_amd64.deb" \
+            -exec cp {} repo/pool/main/ \; || true
+
           cd repo
-          dpkg-scanpackages pool/main /dev/null > dists/stable/main/binary-amd64/Packages
-          gzip -k -f dists/stable/main/binary-amd64/Packages
-          apt-ftparchive release dists/stable/ > dists/stable/Release
+
+          echo "Generating Packages..."
+          dpkg-scanpackages pool/main /dev/null \
+            > dists/stable/main/binary-amd64/Packages
+
+          gzip -kf dists/stable/main/binary-amd64/Packages
+
+          echo "Generating Release..."
+          apt-ftparchive release dists/stable/ \
+            > dists/stable/Release
+
           cd dists/stable
-          
-          KEY_ID="$(gpg --list-secret-keys --with-colons | grep sec | head -n 1 | cut -d':' -f5)"
-          
-          # Use printf '%s' to avoid trailing newlines breaking the passphrase
-          printf '%s' "$GPG_PASS" | gpg --default-key "$KEY_ID" --batch --yes --pinentry-mode loopback --passphrase-fd 0 -abs -o Release.gpg Release
-          printf '%s' "$GPG_PASS" | gpg --default-key "$KEY_ID" --batch --yes --pinentry-mode loopback --passphrase-fd 0 --clearsign -o InRelease Release
+
+          echo "Signing with GPG key: $GPG_KEY_ID"
+
+          gpg --batch --yes \
+            --default-key "$GPG_KEY_ID" \
+            --detach-sign \
+            --armor \
+            --output Release.gpg \
+            Release
+
+          gpg --batch --yes \
+            --default-key "$GPG_KEY_ID" \
+            --clearsign \
+            --output InRelease \
+            Release
 
       - name: Commit and Push to GitHub Pages Branch
         run: |
           git checkout --orphan gh-pages
           git rm -rf .
+
           cp -r repo/* .
+
           echo "repo.fluxnotes.nishantapps.in" > CNAME
+
           [ -f ../public.key ] && cp ../public.key ./public.key || true
+
           git add .
-          git commit -m "Manual APT repo update for ${{ github.event.inputs.tag || 'latest' }}"
+
+          git commit \
+            -m "Update APT repository for ${{ github.event.inputs.tag || 'latest' }}"
+
           git push origin gh-pages --force
-          
