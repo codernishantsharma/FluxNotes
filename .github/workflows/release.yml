@@ -408,16 +408,4 @@ jobs:
             - **`FluxNotes-${{ github.ref_name }}-Simulator.app.zip`** — Drag into any iOS Simulator.
             - **`FluxNotes-${{ github.ref_name }}-release.ipa`** — *(Only if Apple Developer secrets configured)* Fully signed IPA.
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          
-      - name: Commit and Push to GitHub Pages Branch
-        run: |
-          git checkout --orphan gh-pages
-          git rm -rf .
-          cp -r repo/* .
-          echo "repo.fluxnotes.nishantapps.in" > CNAME
-          [ -f ../public.key ] && cp ../public.key ./public.key || true
-          git add .
-          git commit -m "Update APT repo for tag ${{ github.ref_name }}"
-          git push origin gh-pages --force
-          
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}        
