@@ -16,23 +16,14 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # ----------------------------------------------------------
-      # Checkout
-      # ----------------------------------------------------------
       - name: Check out code
         uses: actions/checkout@v4
 
-      # ----------------------------------------------------------
-      # Git configuration
-      # ----------------------------------------------------------
       - name: Set up Git Identity
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-      # ----------------------------------------------------------
-      # Import GPG private key
-      # ----------------------------------------------------------
       - name: Import GPG Private Key
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
@@ -49,17 +40,11 @@ jobs:
           echo "Imported GPG keys:"
           gpg --list-secret-keys --keyid-format LONG
 
-      # ----------------------------------------------------------
-      # Install APT tools
-      # ----------------------------------------------------------
-      - name: Install APT tools
+      - name: Install APT Tools
         run: |
           sudo apt-get update
           sudo apt-get install -y dpkg-dev apt-utils
 
-      # ----------------------------------------------------------
-      # Download Debian package
-      # ----------------------------------------------------------
       - name: Download .deb from GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -90,38 +75,24 @@ jobs:
               --dir all-dist
           fi
 
-          echo ""
           echo "Downloaded packages:"
           find all-dist -type f -name "*.deb" -print
 
-      # ----------------------------------------------------------
-      # Generate APT repository
-      # ----------------------------------------------------------
       - name: Generate APT Metadata
         env:
           GPG_KEY_ID: "DD3569D42FE4D492"
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
         run: |
           set -e
-
-          echo "Creating repository directories..."
 
           mkdir -p repo/pool/main
           mkdir -p repo/dists/stable/main/binary-amd64
 
-          # Copy packages
           find all-dist -type f -name "*.deb" \
             -exec cp {} repo/pool/main/ \;
 
-          echo ""
-          echo "Packages:"
-          find repo/pool/main -type f -name "*.deb" -print
-
           cd repo
 
-          # --------------------------------------------------------
-          # Packages
-          # --------------------------------------------------------
-          echo ""
           echo "Generating Packages..."
 
           dpkg-scanpackages \
@@ -132,10 +103,6 @@ jobs:
           gzip -kf \
             dists/stable/main/binary-amd64/Packages
 
-          # --------------------------------------------------------
-          # Release
-          # --------------------------------------------------------
-          echo ""
           echo "Generating Release..."
 
           apt-ftparchive release dists/stable/ \
@@ -143,10 +110,6 @@ jobs:
 
           cd dists/stable
 
-          # --------------------------------------------------------
-          # GPG configuration
-          # --------------------------------------------------------
-          echo ""
           echo "Configuring GPG..."
 
           mkdir -p "$HOME/.gnupg"
@@ -163,81 +126,44 @@ jobs:
 
           gpgconf --kill gpg-agent || true
 
-          # --------------------------------------------------------
-          # Verify key
-          # --------------------------------------------------------
-          echo ""
-          echo "Available secret keys:"
-          gpg --batch --list-secret-keys --keyid-format LONG
+          echo "Signing with GPG key: $GPG_KEY_ID"
 
-          echo ""
-          echo "Signing with:"
-          echo "$GPG_KEY_ID"
-
-          # --------------------------------------------------------
-          # Create Release.gpg
-          #
-          # Empty passphrase because this key is expected to be
-          # passphrase-less.
-          # --------------------------------------------------------
-          echo ""
-          echo "Creating Release.gpg..."
-
+          # Release.gpg
           gpg \
             --batch \
             --yes \
             --pinentry-mode loopback \
-            --passphrase "" \
+            --passphrase "$GPG_PASSPHRASE" \
             --local-user "$GPG_KEY_ID" \
             --armor \
             --detach-sign \
             --output Release.gpg \
             Release
 
-          # --------------------------------------------------------
-          # Create InRelease
-          # --------------------------------------------------------
-          echo ""
-          echo "Creating InRelease..."
-
+          # InRelease
           gpg \
             --batch \
             --yes \
             --pinentry-mode loopback \
-            --passphrase "" \
+            --passphrase "$GPG_PASSPHRASE" \
             --local-user "$GPG_KEY_ID" \
             --clearsign \
             --output InRelease \
             Release
 
-          echo ""
-          echo "=========================================="
-          echo "APT metadata generated successfully!"
-          echo "=========================================="
+          echo "APT metadata generated successfully."
 
-          echo ""
-          echo "Generated files:"
-          ls -lah
-
-      # ----------------------------------------------------------
-      # Publish to GitHub Pages
-      # ----------------------------------------------------------
       - name: Publish APT Repository
         run: |
           set -e
 
-          echo "Publishing APT repository..."
-
           git checkout --orphan gh-pages
-
           git rm -rf . || true
 
           cp -r repo/* .
 
-          # GitHub Pages custom domain
           echo "repo.fluxnotes.nishantapps.in" > CNAME
 
-          # Copy public GPG key
           if [ -f ../public.key ]; then
             cp ../public.key public.key
           fi
@@ -248,7 +174,4 @@ jobs:
 
           git push origin gh-pages --force
 
-          echo ""
-          echo "=========================================="
           echo "APT repository published successfully!"
-          echo "=========================================="
