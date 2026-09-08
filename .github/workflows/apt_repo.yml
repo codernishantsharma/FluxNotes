@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag to fetch .deb from (leave blank for latest)'
+        description: "Release tag to fetch .deb from (leave blank for latest)"
         required: false
-        default: ''
+        default: ""
 
 permissions:
   contents: write
@@ -16,14 +16,23 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # ------------------------------------------------------------
+      # 1. Checkout repository
+      # ------------------------------------------------------------
       - name: Check out code
         uses: actions/checkout@v4
 
+      # ------------------------------------------------------------
+      # 2. Configure Git
+      # ------------------------------------------------------------
       - name: Set up Git Identity
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
+      # ------------------------------------------------------------
+      # 3. Import GPG signing key
+      # ------------------------------------------------------------
       - name: Import GPG Key
         id: import_gpg
         uses: crazy-max/ghaction-import-gpg@v6
@@ -31,29 +40,40 @@ jobs:
           gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
           passphrase: ${{ secrets.GPG_PASSPHRASE }}
 
+      # ------------------------------------------------------------
+      # 4. Install APT repository tools
+      # ------------------------------------------------------------
       - name: Install dpkg-dev and apt-utils
         run: |
           sudo apt-get update
           sudo apt-get install -y dpkg-dev apt-utils
 
+      # ------------------------------------------------------------
+      # 5. Download Debian package from GitHub Release
+      # ------------------------------------------------------------
       - name: Download .deb from GitHub Releases
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -e
+
           mkdir -p all-dist
 
           TAG="${{ github.event.inputs.tag }}"
 
           if [ -z "$TAG" ]; then
             echo "Fetching assets from the latest release..."
+
             gh release download \
               --pattern "*_amd64.deb" \
               --dir all-dist \
               || gh release download \
               --pattern "*.deb" \
               --dir all-dist
+
           else
             echo "Fetching assets from release tag: $TAG"
+
             gh release download "$TAG" \
               --pattern "*_amd64.deb" \
               --dir all-dist \
@@ -62,61 +82,214 @@ jobs:
               --dir all-dist
           fi
 
+          echo "Downloaded packages:"
+          find all-dist -type f -name "*.deb" -print
+
+      # ------------------------------------------------------------
+      # 6. Generate APT metadata and sign repository
+      # ------------------------------------------------------------
       - name: Generate APT Metadata
         env:
           GPG_KEY_ID: ${{ steps.import_gpg.outputs.keyid }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
         run: |
           set -e
+
+          echo "Creating APT repository directories..."
 
           mkdir -p repo/pool/main
           mkdir -p repo/dists/stable/main/binary-amd64
 
+          # Copy downloaded Debian packages
           find all-dist -name "*_amd64.deb" \
             -exec cp {} repo/pool/main/ \; || true
 
+          # Fallback in case package does not use _amd64.deb naming
+          if ! find repo/pool/main -name "*.deb" -print -quit | grep -q .; then
+            find all-dist -name "*.deb" \
+              -exec cp {} repo/pool/main/ \;
+          fi
+
+          echo ""
+          echo "Packages in repository:"
+          find repo/pool/main -type f -name "*.deb" -print
+
           cd repo
 
+          # --------------------------------------------------------
+          # Generate Packages file
+          # --------------------------------------------------------
+          echo ""
           echo "Generating Packages..."
+
           dpkg-scanpackages pool/main /dev/null \
             > dists/stable/main/binary-amd64/Packages
 
+          # Generate compressed Packages file
           gzip -kf dists/stable/main/binary-amd64/Packages
 
+          # --------------------------------------------------------
+          # Generate Release file
+          # --------------------------------------------------------
+          echo ""
           echo "Generating Release..."
+
           apt-ftparchive release dists/stable/ \
             > dists/stable/Release
 
           cd dists/stable
 
+          # --------------------------------------------------------
+          # Configure GPG for non-interactive GitHub Actions
+          # --------------------------------------------------------
+          echo ""
+          echo "Configuring GPG..."
+
+          mkdir -p "$HOME/.gnupg"
+          chmod 700 "$HOME/.gnupg"
+
+          # Configure GPG itself
+          if ! grep -qxF "pinentry-mode loopback" "$HOME/.gnupg/gpg.conf" 2>/dev/null; then
+            echo "pinentry-mode loopback" >> "$HOME/.gnupg/gpg.conf"
+          fi
+
+          # Configure GPG agent
+          if ! grep -qxF "allow-loopback-pinentry" "$HOME/.gnupg/gpg-agent.conf" 2>/dev/null; then
+            echo "allow-loopback-pinentry" >> "$HOME/.gnupg/gpg-agent.conf"
+          fi
+
+          # Restart GPG agent so the configuration takes effect
+          gpgconf --kill gpg-agent || true
+          gpgconf --launch gpg-agent
+
+          echo ""
+          echo "GPG key:"
+          gpg --list-secret-keys --keyid-format LONG
+
+          echo ""
           echo "Signing with GPG key: $GPG_KEY_ID"
 
-          gpg --batch --yes \
-            --default-key "$GPG_KEY_ID" \
-            --detach-sign \
+          # --------------------------------------------------------
+          # Sign Release -> Release.gpg
+          # --------------------------------------------------------
+          gpg \
+            --batch \
+            --yes \
+            --pinentry-mode loopback \
+            --passphrase "$GPG_PASSPHRASE" \
+            --local-user "$GPG_KEY_ID" \
             --armor \
+            --detach-sign \
             --output Release.gpg \
             Release
 
-          gpg --batch --yes \
-            --default-key "$GPG_KEY_ID" \
+          # --------------------------------------------------------
+          # Sign Release -> InRelease
+          # --------------------------------------------------------
+          gpg \
+            --batch \
+            --yes \
+            --pinentry-mode loopback \
+            --passphrase "$GPG_PASSPHRASE" \
+            --local-user "$GPG_KEY_ID" \
             --clearsign \
             --output InRelease \
             Release
 
+          echo ""
+          echo "APT metadata generated successfully."
+
+          echo ""
+          echo "Generated files:"
+          ls -lah
+
+      # ------------------------------------------------------------
+      # 7. Publish repository to GitHub Pages
+      # ------------------------------------------------------------
       - name: Commit and Push to GitHub Pages Branch
         run: |
-          git checkout --orphan gh-pages
-          git rm -rf .
+          set -e
 
+          echo "Publishing APT repository..."
+
+          git checkout --orphan gh-pages
+
+          git rm -rf . || true
+
+          # Copy generated repository
           cp -r repo/* .
 
+          # GitHub Pages custom domain
           echo "repo.fluxnotes.nishantapps.in" > CNAME
 
-          [ -f ../public.key ] && cp ../public.key ./public.key || true
+          # Copy public GPG key if it exists
+          if [ -f ../public.key ]; then
+            cp ../public.key ./public.key
+          fi
 
+          # Show final repository structure
+          echo ""
+          echo "Final repository:"
+          find . -maxdepth 4 -type f | sort
+
+          # Commit
           git add .
 
           git commit \
             -m "Update APT repository for ${{ github.event.inputs.tag || 'latest' }}"
 
+          # Force update GitHub Pages branch
           git push origin gh-pages --force
+
+          echo ""
+          echo "APT repository published successfully!"
+
+Required GitHub Secrets
+
+Make sure your repository has these two secrets:
+
+GPG_PRIVATE_KEY
+GPG_PASSPHRASE
+
+"GPG_PRIVATE_KEY" should contain the ASCII-armored private key, for example:
+
+-----BEGIN PGP PRIVATE KEY BLOCK-----
+...
+-----END PGP PRIVATE KEY BLOCK-----
+
+And "GPG_PASSPHRASE" should contain the passphrase protecting that private key.
+
+What this workflow produces
+
+After a successful run, your "gh-pages" branch should contain:
+
+gh-pages/
+├── CNAME
+├── public.key
+├── pool/
+│   └── main/
+│       └── fluxnotes_....deb
+└── dists/
+    └── stable/
+        ├── InRelease
+        ├── Release
+        ├── Release.gpg
+        └── main/
+            └── binary-amd64/
+                ├── Packages
+                └── Packages.gz
+
+The important part is that both:
+
+InRelease
+Release.gpg
+
+are now generated using:
+
+--batch
+--pinentry-mode loopback
+--passphrase "$GPG_PASSPHRASE"
+
+so GitHub Actions doesn't try to open an interactive pinentry terminal.
+
+One thing I'd keep an eye on: your "public.key" is currently copied only if "../public.key" exists in the checkout. If you're using this repository as a real APT source for FluxNotes, we should also make sure the public key actually matches "DD3569D42FE4D492" and that your client-side installation instructions use the modern "signed-by=" approach.
