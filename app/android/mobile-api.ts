@@ -5,7 +5,23 @@ export type MobileCommand = {
   [key: string]: unknown;
 };
 
-export async function sendMobileCommand<T = Record<string, unknown>>(command: MobileCommand): Promise<T> {
+export const MOBILE_HOST_TIMEOUT_MS = 5 * 60 * 1000;
+const MOBILE_HOST_MAX_RETRIES = 5;
+const MOBILE_HOST_RETRY_DELAY_MS = 1500;
+
+export function isHostUnreachableError(error: unknown): boolean {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
+  const message = error instanceof Error ? error.message : String(error);
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes('unable to reach the host')
+    || normalized.includes('host not configured')
+    || normalized.includes('network request failed')
+    || normalized.includes('network error')
+  );
+}
+
+async function sendMobileCommandOnce<T = Record<string, unknown>>(command: MobileCommand): Promise<T> {
   const [hostUrl, authToken, deviceInfo] = await Promise.all([
     getMobileValue(mobileKeys.hostUrl),
     getMobileValue(mobileKeys.hostToken),
@@ -16,7 +32,7 @@ export async function sendMobileCommand<T = Record<string, unknown>>(command: Mo
   return new Promise<T>((resolve, reject) => {
     const socket = new WebSocket(toWebSocketUrl(hostUrl));
     let settled = false;
-    const timeout = window.setTimeout(() => finish(new Error('Host connection timed out.')), 15000);
+    const timeout = window.setTimeout(() => finish(new Error('Host connection timed out.')), MOBILE_HOST_TIMEOUT_MS);
     const finish = (error?: Error, value?: T) => {
       if (settled) return;
       settled = true;
@@ -42,4 +58,29 @@ export async function sendMobileCommand<T = Record<string, unknown>>(command: Mo
       }
     };
   });
+}
+
+export async function sendMobileCommand<T = Record<string, unknown>>(command: MobileCommand): Promise<T> {
+  let lastError: Error | undefined;
+
+  for (let attempt = 1; attempt <= MOBILE_HOST_MAX_RETRIES; attempt++) {
+    try {
+      return await sendMobileCommandOnce<T>(command);
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      if (isHostUnreachableError(err)) throw err;
+
+      lastError = err;
+      if (attempt < MOBILE_HOST_MAX_RETRIES) {
+        console.warn('[Mobile API] Host command failed, retrying...', {
+          attempt,
+          command: command.type,
+          reason: err.message,
+        });
+        await new Promise((resolve) => window.setTimeout(resolve, MOBILE_HOST_RETRY_DELAY_MS));
+      }
+    }
+  }
+
+  throw lastError ?? new Error('Host command failed after retries.');
 }

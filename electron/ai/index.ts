@@ -41,6 +41,14 @@ export async function processAiPrompt(
     console.error('Failed to read prompt.md:', error);
   }
 
+  let pageNumber = '';
+  try {
+    const parsed = JSON.parse(userText) as { pageNumber?: string | number; pageNo?: string | number };
+    pageNumber = String(parsed.pageNumber ?? parsed.pageNo ?? '').trim();
+  } catch {
+    // userText may not be JSON (e.g. system prompt flows)
+  }
+
   let result: ChatGptResult | null = null;
 
   if (provider === 'gemini') {
@@ -130,9 +138,44 @@ export async function processAiPrompt(
         let finalOutput = await window.__fluxnotesChatGPT.send(usrText, 'chatgpt', messageAttachments, sessionId);
         const finalText = String(finalOutput && finalOutput.text ? finalOutput.text : "").trim();
 
+        const pageNo = ${JSON.stringify(pageNumber)};
+
+        const sendImageInfoWithRetry = async function () {
+          const rename = pageNo ? pageNo + ".png" : "";
+          const payload = JSON.stringify({ status: "SEND_IMAGE_INFO", rename: rename });
+          const TIMEOUT_MS = 2 * 60 * 1000;
+          const MAX_ATTEMPTS = 10;
+          let lastOutput = null;
+
+          for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            try {
+              const output = await Promise.race([
+                window.__fluxnotesChatGPT.send(payload, 'chatgpt', null, sessionId),
+                new Promise(function (_, reject) {
+                  setTimeout(function () {
+                    reject(new Error("SEND_IMAGE_INFO timed out after 2 minutes"));
+                  }, TIMEOUT_MS);
+                }),
+              ]);
+              lastOutput = output;
+              const text = String(output && output.text ? output.text : "").trim();
+              if (text) {
+                return output;
+              }
+              console.log("[INJECTION] Empty SEND_IMAGE_INFO response. Sending again...", { attempt, rename });
+            } catch (error) {
+              const message = error && error.message ? error.message : String(error);
+              console.warn("[INJECTION] SEND_IMAGE_INFO failed. Sending again...", { attempt, rename, reason: message });
+            }
+          }
+
+          console.error("[INJECTION] SEND_IMAGE_INFO exhausted retries.", { rename, attempts: MAX_ATTEMPTS });
+          return lastOutput;
+        };
+
         if (!finalText) {
           console.log("[INJECTION] Empty image response text. Sending SEND_IMAGE_INFO request.");
-          finalOutput = await window.__fluxnotesChatGPT.send(JSON.stringify({ status: "SEND_IMAGE_INFO" }), 'chatgpt', null, sessionId);
+          finalOutput = await sendImageInfoWithRetry();
         }
 
         const activeConvoId = finalOutput.conversationId || window.__fluxnotesChatGPT.getConversationId(sessionId);

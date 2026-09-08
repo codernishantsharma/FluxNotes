@@ -3,7 +3,8 @@
 /* eslint-disable @next/next/no-img-element */
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { downloadNoteImages, getCachedNotes, getMobileDeviceInfo, getMobileValue, mobileKeys, setCachedNotes, setMobileValue, toHttpApiUrl, toWebSocketUrl } from '../mobile-storage';
+import { sendMobileCommand } from '../mobile-api';
+import { downloadNoteImages, getCachedNotes, getMobileValue, mobileKeys, setCachedNotes, toHttpApiUrl } from '../mobile-storage';
 
 type NoteItem = {
   topicId: string;
@@ -28,8 +29,6 @@ export default function AndroidNoteViewPage() {
   const [zoomedImage, setZoomedImage] = useState<string | null>(null);
 
   useEffect(() => {
-    let socket: WebSocket | null = null;
-    let timeout: number | undefined;
     const loadNote = async () => {
       const requestedId = new URLSearchParams(window.location.search).get('id');
       const [configuredHost, authToken] = await Promise.all([
@@ -54,72 +53,30 @@ export default function AndroidNoteViewPage() {
         return;
       }
 
-      socket = new WebSocket(toWebSocketUrl(configuredHost));
-      timeout = window.setTimeout(() => {
-        socket?.close();
-        setError('The host took too long to respond.');
-        setStatus('');
-      }, 15000);
-
-      socket.onopen = () => {
-        setStatus('Authenticating');
-        getMobileDeviceInfo().then((deviceInfo) => {
-          socket?.send(JSON.stringify({ type: 'auth', authToken, deviceInfo }));
-        }).catch(() => {
-          setError('Unable to read device information.');
+      setStatus('Connecting');
+      try {
+        const message = await sendMobileCommand<{ notes?: NoteItem[] }>({ type: 'list_notes' });
+        const receivedNotes = Array.isArray(message.notes) ? message.notes : [];
+        const selectedNote = receivedNotes.find((candidate) => candidate.topicId === requestedId);
+        if (!selectedNote) {
+          setError('This note is no longer available.');
           setStatus('');
-          socket?.close();
-        });
-      };
-      socket.onmessage = async (event) => {
-      const message = JSON.parse(event.data) as Record<string, unknown>;
-      if (message.type === 'authenticated') {
-        void setMobileValue(mobileKeys.sessionId, String(message.sessionId || ''));
-        void setMobileValue(mobileKeys.sessionToken, String(message.token || ''));
-        void setMobileValue(mobileKeys.renewToken, String(message.renewToken || ''));
-        setStatus('Loading note');
-        socket?.send(JSON.stringify({ type: 'list_notes', sessionId: message.sessionId, token: message.token }));
-        return;
-      }
-      if (message.type === 'notes') {
-        const receivedNotes = (Array.isArray(message.notes) ? message.notes : []) as NoteItem[];
-        const selectedNote = receivedNotes
-          .find((candidate) => (candidate as NoteItem).topicId === requestedId) as NoteItem | undefined;
-        if (!selectedNote) setError('This note is no longer available.');
-        else {
-          const sanitizedUrl = configuredHost.replace(/\/ws$/, '');
-          const downloadedNotes = await Promise.all(receivedNotes.map(async (candidate) => ({
-            ...candidate,
-            images: await downloadNoteImages(candidate.images, sanitizedUrl, candidate.topicId),
-          })));
-          await setCachedNotes(downloadedNotes);
-          setNote(downloadedNotes.find((candidate) => candidate.topicId === requestedId) || selectedNote);
-          setStatus('');
+          return;
         }
-        window.clearTimeout(timeout);
-        socket?.close();
-        return;
-      }
-      if (message.type === 'error') {
-        window.clearTimeout(timeout);
-        setError(String(message.message || 'Unable to load this note.'));
+        const sanitizedUrl = configuredHost.replace(/\/ws$/, '');
+        const downloadedNotes = await Promise.all(receivedNotes.map(async (candidate) => ({
+          ...candidate,
+          images: await downloadNoteImages(candidate.images, sanitizedUrl, candidate.topicId),
+        })));
+        await setCachedNotes(downloadedNotes);
+        setNote(downloadedNotes.find((candidate) => candidate.topicId === requestedId) || selectedNote);
         setStatus('');
-        socket?.close();
+      } catch (loadError) {
+        setError(loadError instanceof Error ? loadError.message : 'Unable to load this note.');
+        setStatus('');
       }
-    };
-      socket.onerror = () => {
-      window.clearTimeout(timeout);
-      setError('Unable to reach the host.');
-      setStatus('');
-    };
-
-      if (timeout) window.clearTimeout(timeout);
     };
     void loadNote();
-    return () => {
-      if (timeout) window.clearTimeout(timeout);
-      socket?.close();
-    };
   }, []);
 
   return (

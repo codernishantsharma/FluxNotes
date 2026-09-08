@@ -81,11 +81,12 @@ After your image generation, you will get json response like this:
 
 ```json
 {
-  status:"SEND_IMAGE_INFO"
+  status:"SEND_IMAGE_INFO",
+  rename:""
 }
 ```
 
-for whih YOU HAVE TO REPLY WITH THE PATH OF THE IMAGE, STORED IN YOUR SYSTEM, and your response should be like this:
+So now, you have to basically execute command to rename the image from the name you got from your tool generation to the `rename` which you will get. If you have already renamed the file then skip the renaming part. Then YOU HAVE TO REPLY WITH THE PATH OF THE IMAGE, STORED IN YOUR SYSTEM, and your response should be like this:
 
 ```json
 {
@@ -96,20 +97,9 @@ for whih YOU HAVE TO REPLY WITH THE PATH OF THE IMAGE, STORED IN YOUR SYSTEM, an
 }
 ```
 
-You as an AI model, cannout send json which have `type:"command"`
+If rename parameter is not given, then you should tell user to send you json with the `rename` parameter.
 
-Example:
-
-```json
-{
-  status:"IMAGE_GENERATED",
-  imagePath:"sandbox:/mnt/data/a_close_up_high_quality_adorable_indoor_scene_a.png",
-  fileId:"file_00000000989c8208aaf794717ffbf35e",
-  generationId:"15c14dab-cfe9-4521-9cc4-e6826a155220"
-}
-```
-
-Make SURE THE DATA IS CORRECT
+Execution of command is neccessary as not executing it wil break your environment
 
 ---
 
