@@ -409,52 +409,7 @@ jobs:
             - **`FluxNotes-${{ github.ref_name }}-release.ipa`** — *(Only if Apple Developer secrets configured)* Fully signed IPA.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  update-apt-repo:
-    needs: release
-    if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v') }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out code
-        uses: actions/checkout@v4
-
-      - name: Download all workflow artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: dist-*
-          path: all-dist
-          merge-multiple: true
-
-      - name: Set up Git Identity
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-
-      - name: Import GPG Key
-        uses: crazy-max/ghaction-import-gpg@v6
-        with:
-          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
-          passphrase: ${{ secrets.GPG_PASSPHRASE }}
-
-      - name: Generate APT Metadata
-        env:
-          GPG_PASS: ${{ secrets.GPG_PASSPHRASE }}
-        run: |
-          mkdir -p repo/pool/main repo/dists/stable/main/binary-amd64
-          find all-dist -name "*_amd64.deb" -exec cp {} repo/pool/main/ \; || true
-          cd repo
-          dpkg-scanpackages pool/main /dev/null > dists/stable/main/binary-amd64/Packages
-          gzip -k -f dists/stable/main/binary-amd64/Packages
-          apt-ftparchive release dists/stable/ > dists/stable/Release
-          cd dists/stable
           
-          # Get the Key ID securely
-          KEY_ID="$(gpg --list-secret-keys --with-colons | grep sec | head -n 1 | cut -d':' -f5)"
-          
-          # Pipe the passphrase directly into GPG so it doesn't prompt for input
-          echo "$GPG_PASS" | gpg --default-key "$KEY_ID" --batch --yes --pinentry-mode loopback --passphrase-fd 0 -abs -o Release.gpg Release
-          echo "$GPG_PASS" | gpg --default-key "$KEY_ID" --batch --yes --pinentry-mode loopback --passphrase-fd 0 --clearsign -o InRelease Release
-
       - name: Commit and Push to GitHub Pages Branch
         run: |
           git checkout --orphan gh-pages
