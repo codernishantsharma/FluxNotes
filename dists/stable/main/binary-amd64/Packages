@@ -1,0 +1,18 @@
+Package: fluxnotes
+Version: 0.2.7
+Architecture: amd64
+Maintainer: Nishant <nishant@nishantapps.in>
+Installed-Size: 630593
+Depends: libgtk-3-0, libnotify4, libnss3, libxss1, libxtst6, xdg-utils, libatspi2.0-0, libuuid1, libsecret-1-0
+Recommends: libappindicator3-1
+Filename: repo/pool/main/fluxnotes_0.2.7_amd64.deb
+Size: 164908800
+MD5sum: 9862fa2f196c71ed6accc922d1d350da
+SHA1: 6cd94faf661873c1cca13f6c0b4bc23aa07b6ab8
+SHA256: 203e7c0e13430f3111534b90f4312265a975e75eb4611ba22e51d1a491a64433
+Section: default
+Priority: optional
+Homepage: https://github.com/codernishantsharma/FluxNotes
+License: unknown
+Vendor: Nishant <nishant@nishantapps.in>
+

@@ -1,0 +1,34 @@
+-----BEGIN PGP SIGNED MESSAGE-----
+Hash: SHA512
+
+Date: Wed, 09 Sep 2026 16:09:14 +0000
+MD5Sum:
+ d03c68402d5a01106861dedaa99cc359               38 Release
+ 2be87d67c5e6f200236d6b58f3844d95              645 main/binary-amd64/Packages
+ ee898162863e50c3b100be36cf69f3d3              452 main/binary-amd64/Packages.gz
+SHA1:
+ da60757a3712bd5ae5775d9179f1af253aa518f4               38 Release
+ dbeb9409c1f95ecf525e6e1ed45e68db836da80e              645 main/binary-amd64/Packages
+ c8ec05412c8a187cd300ccf32efa306e32c0252d              452 main/binary-amd64/Packages.gz
+SHA256:
+ 2c6386664d05e4e0f2cea5770a959d4d5ebb5fda700ac7cfd966d33b14eddeed               38 Release
+ ebcd99b181a5308bd74e272386c828c04759918aaea7525529b675f4779d54fa              645 main/binary-amd64/Packages
+ f3bbd3163c9b2b317f9ecbd4e0f8352e8ea7a5255909bdec31a448857c13c031              452 main/binary-amd64/Packages.gz
+SHA512:
+ 51d00962d0d14ad07f9621c7abb9d32bb7ed7e580a2c5a1a054d0170c5b5ffd250eb9dc5538486da8c8ce6be18232eae10d7e64cfd2343452bdc035d31908dcf               38 Release
+ 8f619eb7539f5362f81f6a502830c7789e51598109e5f37a24fc9c9ec2389f5356e6ad1ad4ce9126fb0c8db4ae45211b8d591624c2bce82f92bda7228538786f              645 main/binary-amd64/Packages
+ 5924fc9f43265716c8fe02b697db1e50ccf7b34504ef88e4440fde22183e1559cab7c57cbd18823c07803fbecd675d60f6f52b891fc8c4db72297bbdf7766eaf              452 main/binary-amd64/Packages.gz
+-----BEGIN PGP SIGNATURE-----
+
+iQGzBAEBCgAdFiEExXzBfv9YNlbsiU273TVp1C/k1JIFAmqhhKwACgkQ3TVp1C/k
+1JKBGgv9HEpbxpu2/o4UNZrQaXg6n4oe+Ttb8D9H3qp89fPi0opy47uxJuZO6M6f
+BKOyvCpwqGr7vmfqMuCEQvY0UXR/ZJQNCNLzVsRueRPCrmtQR1ehy+pMQ1kfy15T
+W+whD/7n6wrTmBXGTSquwE+aYby+myln8a9C4Ve+KFmC6Y4P5JUZQ0h9oNJ3xS+u
+H6tMg13uLVrOk9MpITfvHb/qFVXp1ZHGJfApFjG8rqnqqi9jZEDjK6EGpFGu2OZN
+mcOkk5oc44cCjbjE/J2hr+dyUl/9puWxKf07dMTlDyC8I9uOhd3xD72vRK1NCMXU
+3SquhstT3073WG4xqHW3s13SHE9RGVTnSDxMTpHc0bIQPV6sEj/y0LQGF/lCpfn5
+Ck0VkH59duX9GH8FO8xZOM20QJDI4dK2olx6fkfPy94c4YdMmtLRINVJzxZfOsg+
+XoKtYBsi+wR1pfcRwgcZwHinKFI0eTARtvWvwwbCGaaamGrSzVpYrEjr8NoCj2s0
+/aFjzedo
+=rwr+
+-----END PGP SIGNATURE-----
