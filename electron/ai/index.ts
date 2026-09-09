@@ -3,9 +3,10 @@ import fs from 'fs';
 import { BrowserWindow, net } from 'electron';
 import { AIProvider, ChatGptResult, ChatSession } from '../types';
 import { createChatSessionId, safeFileName, extractJsonFromResponse, completeTruncatedJson, completeNotePayload, toLocalImageUrl } from '../utils/helpers';
-import { writeRawResponse, appendToResultJson, saveRecordToDb, imagesDir } from '../utils/storage';
+import { writeRawResponse, appendToResultJson, saveRecordToDb, saveFailedPage, imagesDir } from '../utils/storage';
 import { injectGeminiEngineIfNeeded, downloadGeminiImages } from './gemini';
 import { injectChatGptEngineIfNeeded } from './chatgpt';
+import { logError } from '../utils/logger';
 
 export async function processAiPrompt(
   workerWindow: BrowserWindow,
@@ -38,7 +39,13 @@ export async function processAiPrompt(
       promptContent = fs.readFileSync(promptPath, 'utf-8');
     }
   } catch (error) {
+    const err = error as Error;
     console.error('Failed to read prompt.md:', error);
+    logError({
+      category: 'storage',
+      message: 'Failed to read prompt.md',
+      details: { error: err.message, stack: err.stack },
+    });
   }
 
   let pageNumber = '';
@@ -52,58 +59,70 @@ export async function processAiPrompt(
   let result: ChatGptResult | null = null;
 
   if (provider === 'gemini') {
-    await injectGeminiEngineIfNeeded(workerWindow);
-    const geminiPromptContent = promptContent.replace(
-      /### Your Image Response[\s\S]*?(?=### Info On Image Generation)/,
-      '',
-    );
-    const isGeminiImageCommand = (() => {
-      try {
-        const parsed = JSON.parse(userText) as { status?: unknown };
-        return parsed.status === 'start' || parsed.status === 'continue';
-      } catch {
-        return /["']?status["']?\s*:\s*["'](?:start|continue)["']/i.test(userText);
-      }
-    })();
-
-    const geminiResult = await workerWindow.webContents.executeJavaScript(`
-      (async function() {
-        if (!window.__fluxnotesGeminiUnified) {
-          throw new Error("Gemini engine not loaded.");
+    try {
+      await injectGeminiEngineIfNeeded(workerWindow);
+      const geminiPromptContent = promptContent.replace(
+        /### Your Image Response[\s\S]*?(?=### Info On Image Generation)/,
+        '',
+      );
+      const isGeminiImageCommand = (() => {
+        try {
+          const parsed = JSON.parse(userText) as { status?: unknown };
+          return parsed.status === 'start' || parsed.status === 'continue';
+        } catch {
+          return /["']?status["']?\s*:\s*["'](?:start|continue)["']/i.test(userText);
         }
-
-        const sysPrompt = ${JSON.stringify(geminiPromptContent)};
-        const usrText = ${JSON.stringify(userText)};
-        const sessionId = ${JSON.stringify(sessionId)};
-        ${geminiInitialized ? '' : `if (sysPrompt.trim()) await window.__fluxnotesGeminiUnified.send(sysPrompt, '3.1-pro', null, sessionId);`}
-        const response = await window.__fluxnotesGeminiUnified.send(usrText, '3.1-pro', null, sessionId);
-        return { rawText: String(response || ''), session: null };
       })();
-    `);
-    geminiInitialized = true;
-    const downloadedGeminiImages = isGeminiImageCommand
-      ? await downloadGeminiImages(geminiResult?.rawText || '')
-      : [];
 
-    result = {
-      rawText: geminiResult?.rawText || '',
-      conversationId: null,
-      messageId: null,
-      session: null,
-      generationId: null,
-      fileId: null,
-      generatedImages: downloadedGeminiImages.map(({ download, ...image }) => image),
-      downloadedSandboxImages: downloadedGeminiImages,
-    };
+      const geminiResult = await workerWindow.webContents.executeJavaScript(`
+        (async function() {
+          if (!window.__fluxnotesGeminiUnified) {
+            throw new Error("Gemini engine not loaded.");
+          }
+
+          const sysPrompt = ${JSON.stringify(geminiPromptContent)};
+          const usrText = ${JSON.stringify(userText)};
+          const sessionId = ${JSON.stringify(sessionId)};
+          ${geminiInitialized ? '' : `if (sysPrompt.trim()) await window.__fluxnotesGeminiUnified.send(sysPrompt, '3.1-pro', null, sessionId);`}
+          const response = await window.__fluxnotesGeminiUnified.send(usrText, '3.1-pro', null, sessionId);
+          return { rawText: String(response || ''), session: null };
+        })();
+      `);
+      geminiInitialized = true;
+      const downloadedGeminiImages = isGeminiImageCommand
+        ? await downloadGeminiImages(geminiResult?.rawText || '')
+        : [];
+
+      result = {
+        rawText: geminiResult?.rawText || '',
+        conversationId: null,
+        messageId: null,
+        session: null,
+        generationId: null,
+        fileId: null,
+        generatedImages: downloadedGeminiImages.map(({ download, ...image }) => image),
+        downloadedSandboxImages: downloadedGeminiImages,
+      };
+    } catch (geminiError) {
+      const err = geminiError as Error;
+      console.error('[ELECTRON] Gemini processing error:', err.message);
+      logError({
+        category: 'api',
+        message: 'Gemini AI processing failed',
+        details: { error: err.message, stack: err.stack, userText: userText.substring(0, 200) },
+      });
+      throw err;
+    }
   } else {
-    await injectChatGptEngineIfNeeded(workerWindow);
+    try {
+      await injectChatGptEngineIfNeeded(workerWindow);
 
-    // Register storage for asset_pointer generated images
-    await workerWindow.webContents.executeJavaScript(`
-      window.__fluxnotesGeneratedAssetImages = [];
-    `);
+      // Register storage for asset_pointer generated images
+      await workerWindow.webContents.executeJavaScript(`
+        window.__fluxnotesGeneratedAssetImages = [];
+      `);
 
-    result = await workerWindow.webContents.executeJavaScript(`
+      result = await workerWindow.webContents.executeJavaScript(`
       (async function() {
         if (!window.__fluxnotesChatGPT) {
           throw new Error("fluxnotes engine not loaded.");
@@ -264,6 +283,16 @@ export async function processAiPrompt(
         };
       })();
     `);
+    } catch (chatgptError) {
+      const err = chatgptError as Error;
+      console.error('[ELECTRON] ChatGPT processing error:', err.message);
+      logError({
+        category: 'api',
+        message: 'ChatGPT AI processing failed',
+        details: { error: err.message, stack: err.stack, userText: userText.substring(0, 200) },
+      });
+      throw err;
+    }
   }
 
   if (result) {
@@ -297,23 +326,51 @@ export async function processAiPrompt(
         const noteIdValue = String(sessionId || messageId || 'note');
         const fileName = `image_${safeFileName(noteIdValue)}_${safeFileName(usedFileId)}.${safeExt}`;
         const filePath = path.join(imagesDir, fileName);
+        
+        // Extract page number from the result payload if available
+        let pageNumber: number | null = null;
+        try {
+          const jsonText = extractJsonFromResponse(rawText);
+          const jsonData = JSON.parse(completeTruncatedJson(jsonText)) as { pageNumber?: string | number };
+          if (jsonData.pageNumber) {
+            pageNumber = typeof jsonData.pageNumber === 'string' ? parseInt(jsonData.pageNumber, 10) : jsonData.pageNumber;
+          }
+        } catch {
+          // If we can't parse the page number, leave it null
+        }
+        
         try {
           console.log('[ELECTRON] Saving downloaded sandbox image to disk:', {
             imagePath: img.imagePath || null,
             fileId: img.fileId || fileId || null,
             generationId: img.generationId || generationId || null,
+            pageNumber: pageNumber,
             destination: filePath,
           });
           fs.writeFileSync(filePath, base64Data, 'base64');
           console.log('[ELECTRON] Sandbox image saved locally:', filePath);
-          await saveRecordToDb({ id: usedFileId, filePath, timestamp: Date.now(), source: 'sandbox', generationId: img.generationId || generationId || undefined, fileId: img.fileId || fileId || undefined });
+          await saveRecordToDb({ 
+            id: usedFileId, 
+            filePath, 
+            timestamp: Date.now(), 
+            source: 'sandbox', 
+            generationId: img.generationId || generationId || undefined, 
+            fileId: img.fileId || fileId || undefined,
+            pageNumber: pageNumber || undefined,
+            sessionId: sessionId,
+          });
           if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('new-image', { filePath: toLocalImageUrl(filePath), pageNumber: null });
+            mainWindow.webContents.send('new-image', { filePath: toLocalImageUrl(filePath), pageNumber });
             console.log('[ELECTRON] Sent new-image event with local path:', toLocalImageUrl(filePath));
           }
         } catch (saveErr) {
           const err = saveErr as Error;
           console.error('[ELECTRON] Failed to save sandbox image locally:', err.message);
+          logError({
+            category: 'storage',
+            message: 'Failed to save sandbox image locally',
+            details: { error: err.message, stack: err.stack, filePath, fileId: img.fileId || fileId },
+          });
         }
       }
     }
@@ -322,6 +379,18 @@ export async function processAiPrompt(
     if (Array.isArray(generatedAssetImages) && generatedAssetImages.length > 0) {
       for (const img of generatedAssetImages) {
         if (!img || !img.downloadUrl) continue;
+        
+        // Extract page number from the result payload if available
+        let pageNumber: number | null = null;
+        try {
+          const jsonText = extractJsonFromResponse(rawText);
+          const jsonData = JSON.parse(completeTruncatedJson(jsonText)) as { pageNumber?: string | number };
+          if (jsonData.pageNumber) {
+            pageNumber = typeof jsonData.pageNumber === 'string' ? parseInt(jsonData.pageNumber, 10) : jsonData.pageNumber;
+          }
+        } catch {
+          // If we can't parse the page number, leave it null
+        }
         
         try {
           console.log('[ELECTRON] Downloading asset image from URL:', img.downloadUrl);
@@ -374,6 +443,7 @@ export async function processAiPrompt(
           console.log('[ELECTRON] Saving downloaded asset image to disk:', {
             fileId: img.fileId || fileId || null,
             generationId: generationId || null,
+            pageNumber: pageNumber,
             destination: filePath,
           });
           
@@ -386,16 +456,23 @@ export async function processAiPrompt(
             timestamp: Date.now(), 
             source: 'asset_pointer', 
             generationId: generationId || undefined, 
-            fileId: img.fileId || fileId || undefined 
+            fileId: img.fileId || fileId || undefined,
+            pageNumber: pageNumber || undefined,
+            sessionId: sessionId,
           });
           
           if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('new-image', { filePath: toLocalImageUrl(filePath), pageNumber: null });
+            mainWindow.webContents.send('new-image', { filePath: toLocalImageUrl(filePath), pageNumber });
             console.log('[ELECTRON] Sent new-image event with local path:', toLocalImageUrl(filePath));
           }
         } catch (downloadErr) {
           const err = downloadErr as Error;
           console.error('[ELECTRON] Failed to download and save asset image:', err.message);
+          logError({
+            category: 'api',
+            message: 'Failed to download and save asset image',
+            details: { error: err.message, stack: err.stack, downloadUrl: img.downloadUrl, fileId: img.fileId || fileId },
+          });
         }
       }
     }
@@ -423,6 +500,11 @@ export async function processAiPrompt(
     } catch (parseErr) {
       const err = parseErr as Error;
       console.error('[ELECTRON] JSON Parse Error:', err.message);
+      logError({
+        category: 'parsing',
+        message: 'Failed to parse JSON response',
+        details: { error: err.message, stack: err.stack, rawText: rawText.substring(0, 500) },
+      });
       return {
         resultPayload: { error: 'Failed to parse JSON', raw: rawText, messageId, conversationId, generationId, fileId, generatedImages },
         newSessionId: sessionId,

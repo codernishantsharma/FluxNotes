@@ -1,8 +1,9 @@
 import { app } from 'electron';
 import path from 'path';
 import fs from 'fs';
-import { NoteRecord, ImageRecord, NotesData, RawResponseData } from '../types';
+import { NoteRecord, ImageRecord, NotesData, RawResponseData, FailedPage } from '../types';
 import { extractJsonFromResponse, completeTruncatedJson } from './helpers';
+import { logError } from './logger';
 
 export const dataFilePath = path.join(app.getPath('userData'), 'notes_data.json');
 export const imagesDir = path.join(app.getPath('userData'), 'images');
@@ -28,19 +29,32 @@ export async function readDataFileAsync(): Promise<NotesData> {
       return {
         notes_collection: Array.isArray(parsed.notes_collection) ? parsed.notes_collection : [],
         image_records: Array.isArray(parsed.image_records) ? parsed.image_records : [],
+        failed_pages: Array.isArray(parsed.failed_pages) ? parsed.failed_pages : [],
       };
     }
   } catch (err) {
+    const error = err as Error;
     console.error('Failed to read local JSON data file:', err);
+    logError({
+      category: 'storage',
+      message: 'Failed to read local JSON data file',
+      details: { error: error.message, stack: error.stack, filePath: dataFilePath },
+    });
   }
-  return { notes_collection: [], image_records: [] };
+  return { notes_collection: [], image_records: [], failed_pages: [] };
 }
 
 export async function writeDataFileAsync(data: NotesData): Promise<void> {
   try {
     await fs.promises.writeFile(dataFilePath, JSON.stringify(data, null, 2), 'utf-8');
   } catch (err) {
+    const error = err as Error;
     console.error('Failed to write local JSON data file:', err);
+    logError({
+      category: 'storage',
+      message: 'Failed to write local JSON data file',
+      details: { error: error.message, stack: error.stack, filePath: dataFilePath },
+    });
   }
 }
 
@@ -72,6 +86,36 @@ export async function saveImageRecords(records: ImageRecord[]): Promise<void> {
   await writeDataFileAsync(data);
 }
 
+export async function saveFailedPage(failedPage: FailedPage): Promise<void> {
+  const data = await readDataFileAsync();
+  if (!data.failed_pages) {
+    data.failed_pages = [];
+  }
+  
+  // Remove existing failed page for the same page number and session
+  data.failed_pages = data.failed_pages.filter(
+    fp => !(fp.pageNumber === failedPage.pageNumber && fp.sessionId === failedPage.sessionId)
+  );
+  
+  data.failed_pages.push(failedPage);
+  await writeDataFileAsync(data);
+}
+
+export async function getFailedPages(): Promise<FailedPage[]> {
+  const data = await readDataFileAsync();
+  return data.failed_pages || [];
+}
+
+export async function removeFailedPage(pageNumber: number, sessionId: string): Promise<void> {
+  const data = await readDataFileAsync();
+  if (data.failed_pages) {
+    data.failed_pages = data.failed_pages.filter(
+      fp => !(fp.pageNumber === pageNumber && fp.sessionId === sessionId)
+    );
+    await writeDataFileAsync(data);
+  }
+}
+
 export async function writeRawResponse(responseData: RawResponseData): Promise<void> {
   try {
     let formattedJson: unknown = null;
@@ -91,6 +135,11 @@ export async function writeRawResponse(responseData: RawResponseData): Promise<v
   } catch (error) {
     const err = error as Error;
     console.error('[raw.json] Failed to save raw response:', err.message);
+    logError({
+      category: 'storage',
+      message: 'Failed to save raw response to raw.json',
+      details: { error: err.message, stack: err.stack, filePath: RAW_JSON_PATH },
+    });
   }
 }
 
@@ -109,6 +158,11 @@ export function appendToResultJson(entry: Record<string, unknown>): void {
       } catch (e) {
         const err = e as Error;
         console.warn('[result.json] Failed to read existing file, starting fresh:', err.message);
+        logError({
+          category: 'storage',
+          message: 'Failed to read existing result.json file',
+          details: { error: err.message, stack: err.stack, filePath: RESULT_JSON_PATH },
+        });
         arr = [];
       }
       arr.push({
@@ -120,6 +174,11 @@ export function appendToResultJson(entry: Record<string, unknown>): void {
     } catch (writeErr) {
       const err = writeErr as Error;
       console.error('[result.json] Failed to write:', err.message);
+      logError({
+        category: 'storage',
+        message: 'Failed to write to result.json',
+        details: { error: err.message, stack: err.stack, filePath: RESULT_JSON_PATH },
+      });
     }
   }
 }

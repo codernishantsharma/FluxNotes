@@ -33,6 +33,8 @@ in this JSON, give the `TOPIC_NAME` the name of the topic user asked; in sub top
 
 `status` has 2 options: `new` or `update` . `new` when the json list is new and `update` when user gave instruction and you need to update the JSON for topics or subtopics. YOU CAN USE `new` ONLY ONCE IN THE CHAT.
 
+Your `pageNumber` should be in distinctively format of '1', '2', '3', '4', etc etc. No other format is allowed even if user asks for it.
+
 All these parameters ARE MUST. Do not keep any data empty or ""
 
 For `topicId` you need to generate a random 16 digit uuid 
@@ -70,6 +72,32 @@ You can continue to generate next image when you get a JSON input as
   pageNumber: ""
 }
 ```
+
+---
+
+---
+
+### Failed Page Recreation
+
+If a previous image generation failed and you receive a retry request, you should recreate the failed page with the same topic and content. The retry request will include:
+
+```json
+{
+  status: "retry",
+  pageNumber: "",
+  subTopicNames: ["", ""],
+  originalTopic: ""
+}
+```
+
+When you receive a retry request:
+- Use the same subTopicNames and content from the original failed attempt
+- Generate a fresh image for the specified pageNumber
+- Follow the same A4 paper format and style guidelines
+- Ensure the content matches the original topic requirements
+- Do not change the topic or subtopic content unless explicitly requested
+
+The retry system allows users to recover from generation failures without losing their progress.
 
 ---
 

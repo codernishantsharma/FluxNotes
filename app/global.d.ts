@@ -40,6 +40,11 @@ declare global {
       getNgrokSettings: () => Promise<{ configured: boolean; active: boolean; url: string | null; port: number; domain: string }>;
       configureNgrok: (token: string, port: number, domain: string) => Promise<{ success: boolean; error?: string; configured?: boolean; active?: boolean; url?: string | null; port?: number; domain?: string }>;
       syncSessionToServer: (serverUrl: string, password: string) => Promise<{ success: boolean; loggedIn?: boolean; error?: string }>;
+      getFailedPages: () => Promise<{ success: boolean; failedPages?: Array<{pageNumber: number; subTopicNames: string[]; originalTopic: string; sessionId: string; errorMessage?: string; timestamp: number}> }>;
+      saveFailedPage: (failedPage: {pageNumber: number; subTopicNames: string[]; originalTopic: string; sessionId: string; errorMessage?: string; timestamp: number}) => Promise<{ success: boolean }>;
+      removeFailedPage: (pageNumber: number, sessionId: string) => Promise<{ success: boolean }>;
+      getLogs: () => Promise<{ success: boolean; logs?: string; error?: string }>;
+      clearLogs: () => Promise<{ success: boolean; error?: string }>;
     };
   }
 }

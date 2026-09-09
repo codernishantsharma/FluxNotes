@@ -34,6 +34,7 @@ export default function NewChatPage() {
   const [exportMessage, setExportMessage] = useState<string | null>(null);
   const [pageStartTimes, setPageStartTimes] = useState<Record<number, number>>({});
   const [failedPages, setFailedPages] = useState<Record<number, string>>({});
+  const [failedPagesData, setFailedPagesData] = useState<Array<{pageNumber: number; subTopicNames: string[]; originalTopic: string; sessionId: string; errorMessage?: string; timestamp: number}>>([]);
   const [nowMs, setTickNow] = useState<number>(() => Date.now());
   const [provider, setProvider] = useState<AIProvider>('chatgpt');
   const [selectedFiles, setSelectedFiles] = useState<ChatAttachment[]>([]);
@@ -85,6 +86,7 @@ export default function NewChatPage() {
           if (prev.some((item) => item.filePath === filePath)) return prev;
 
           setLoadingPagesCount((count) => Math.max(0, count - 1));
+          // Only remove failed status for the specific page that just succeeded
           setFailedPages((prevFailed) => {
             if (!prevFailed[nextPgNum]) return prevFailed;
             const next = { ...prevFailed };
@@ -112,6 +114,21 @@ export default function NewChatPage() {
   useEffect(() => {
     const intervalId = window.setInterval(() => setTickNow(Date.now()), 500);
     return () => window.clearInterval(intervalId);
+  }, []);
+
+  // Load failed pages from storage on mount
+  useEffect(() => {
+    const loadFailedPages = async () => {
+      try {
+        const result = await window.electronAPI?.getFailedPages?.();
+        if (result?.success && Array.isArray(result.failedPages)) {
+          setFailedPagesData(result.failedPages);
+        }
+      } catch (error) {
+        console.error('Failed to load failed pages:', error);
+      }
+    };
+    loadFailedPages();
   }, []);
 
   useEffect(() => {
@@ -241,6 +258,22 @@ export default function NewChatPage() {
             console.error(errMsg, pageErr);
             setFailedPages((prev) => ({ ...prev, [pageNumInt]: errMsg }));
             setLoadingPagesCount((count) => Math.max(0, count - 1));
+            
+            // Save failed page information for retry
+            if (window.electronAPI?.saveFailedPage && latestAssistantData) {
+              try {
+                await window.electronAPI.saveFailedPage({
+                  pageNumber: pageNumInt,
+                  subTopicNames: currentSubTopic.names || [],
+                  originalTopic: latestAssistantData.topicName || '',
+                  sessionId: chatSessionRef.current.sessionId || '',
+                  errorMessage: errMsg,
+                  timestamp: Date.now(),
+                });
+              } catch (saveErr) {
+                console.error('Failed to save failed page info:', saveErr);
+              }
+            }
           }
         }
 
@@ -338,6 +371,101 @@ export default function NewChatPage() {
     const targetImg = imageRefs.current[pageNum - 1];
     if (targetImg) {
       targetImg.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+
+  const handleRetryFailedPage = async (failedPage: {pageNumber: number; subTopicNames: string[]; originalTopic: string; sessionId: string}) => {
+    try {
+      setIsProcessing(true);
+      setCurrentlyGeneratingPage(failedPage.pageNumber);
+      setFailedPages((prev) => {
+        const next = { ...prev };
+        delete next[failedPage.pageNumber];
+        return next;
+      });
+
+      const retryPayload = JSON.stringify({
+        status: 'retry',
+        subTopicNames: failedPage.subTopicNames,
+        pageNumber: String(failedPage.pageNumber),
+        originalTopic: failedPage.originalTopic,
+      }, null, 2);
+
+      const responseData = await window.electronAPI?.fillChatGptInput(retryPayload);
+      
+      if (!responseData || responseData === false || (responseData as { error?: unknown })?.error) {
+        throw new Error(`Retry failed for page ${failedPage.pageNumber}.`);
+      }
+
+      // Remove from failed pages data on success
+      setFailedPagesData((prev) => 
+        prev.filter(fp => !(fp.pageNumber === failedPage.pageNumber && fp.sessionId === failedPage.sessionId))
+      );
+
+      // Remove from storage
+      await window.electronAPI?.removeFailedPage?.(failedPage.pageNumber, failedPage.sessionId);
+
+    } catch (retryError) {
+      const errMsg = retryError instanceof Error ? retryError.message : `Retry failed for page ${failedPage.pageNumber}.`;
+      console.error(errMsg, retryError);
+      setFailedPages((prev) => ({ ...prev, [failedPage.pageNumber]: errMsg }));
+    } finally {
+      setIsProcessing(false);
+      setCurrentlyGeneratingPage(null);
+    }
+  };
+
+  const handleRetryPageDuringGeneration = async (pageNumber: number) => {
+    if (!assistantData?.subTopics) return;
+    
+    const subTopic = assistantData.subTopics[pageNumber - 1];
+    if (!subTopic) return;
+
+    try {
+      setIsProcessing(true);
+      setCurrentlyGeneratingPage(pageNumber);
+      setFailedPages((prev) => {
+        const next = { ...prev };
+        delete next[pageNumber];
+        return next;
+      });
+
+      const retryPayload = JSON.stringify({
+        status: 'retry',
+        subTopicNames: subTopic.names || [],
+        pageNumber: String(pageNumber),
+        originalTopic: assistantData.topicName || '',
+      }, null, 2);
+
+      const responseData = await window.electronAPI?.fillChatGptInput(retryPayload);
+      
+      if (!responseData || responseData === false || (responseData as { error?: unknown })?.error) {
+        throw new Error(`Retry failed for page ${pageNumber}.`);
+      }
+
+    } catch (retryError) {
+      const errMsg = retryError instanceof Error ? retryError.message : `Retry failed for page ${pageNumber}.`;
+      console.error(errMsg, retryError);
+      setFailedPages((prev) => ({ ...prev, [pageNumber]: errMsg }));
+      
+      // Save failed page information for retry
+      if (window.electronAPI?.saveFailedPage) {
+        try {
+          await window.electronAPI.saveFailedPage({
+            pageNumber,
+            subTopicNames: subTopic.names || [],
+            originalTopic: assistantData.topicName || '',
+            sessionId: chatSessionRef.current.sessionId || '',
+            errorMessage: errMsg,
+            timestamp: Date.now(),
+          });
+        } catch (saveErr) {
+          console.error('Failed to save failed page info:', saveErr);
+        }
+      }
+    } finally {
+      setIsProcessing(false);
+      setCurrentlyGeneratingPage(null);
     }
   };
 
@@ -461,21 +589,56 @@ export default function NewChatPage() {
                       nowMs={nowMs}
                       failedMsg={failedMsg}
                       idx={idx}
+                      onRetry={() => handleRetryPageDuringGeneration(targetPageNum)}
+                      isProcessing={isProcessing}
                     />
                   );
                 })}
               </>
             ) : hasStartedGeneration && pageImages.length > 0 ? (
-              pageImages.map((img, idx) => (
-                <img
-                  key={idx}
-                  ref={(el) => { imageRefs.current[idx] = el; }}
-                  src={img.filePath}
-                  alt={`Generated Page ${img.pageNumber}`}
-                  loading="lazy"
-                  className="m-0 block h-auto w-full rounded-md border border-white/5 p-0 shadow-lg"
-                />
-              ))
+              <>
+                {pageImages.map((img, idx) => (
+                  <img
+                    key={idx}
+                    ref={(el) => { imageRefs.current[idx] = el; }}
+                    src={img.filePath}
+                    alt={`Generated Page ${img.pageNumber}`}
+                    loading="lazy"
+                    className="m-0 block h-auto w-full rounded-md border border-white/5 p-0 shadow-lg"
+                  />
+                ))}
+                
+                {/* Failed Pages Retry Section */}
+                {failedPagesData.length > 0 && (
+                  <div className="mt-6 rounded-xl border border-red-500/30 bg-red-950/20 p-4 backdrop-blur-sm">
+                    <h3 className="mb-3 text-sm font-medium text-red-300">Failed Pages</h3>
+                    <div className="space-y-2">
+                      {failedPagesData.map((failedPage) => (
+                        <div 
+                          key={`${failedPage.pageNumber}-${failedPage.sessionId}`}
+                          className="flex items-center justify-between rounded-lg border border-red-500/20 bg-red-950/10 px-3 py-2"
+                        >
+                          <div className="flex flex-col">
+                            <span className="text-xs font-medium text-red-200">
+                              Page {failedPage.pageNumber}
+                            </span>
+                            <span className="text-[10px] text-red-300/70">
+                              {failedPage.subTopicNames.join(', ')}
+                            </span>
+                          </div>
+                          <button
+                            onClick={() => handleRetryFailedPage(failedPage)}
+                            disabled={isProcessing}
+                            className="rounded-lg bg-red-500/20 px-3 py-1 text-xs font-medium text-red-200 transition hover:bg-red-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            Retry
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
             ) : (
               <div className="flex min-h-[50vh] items-center justify-center text-center text-sm text-slate-500" />
             )}

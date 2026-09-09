@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import { NoteRecord, ExportNoteOptions } from './types';
+import { NoteRecord, ExportNoteOptions, FailedPage } from './types';
 
 contextBridge.exposeInMainWorld('electronAPI', {
   minimize: () => ipcRenderer.send('window-minimize'),
@@ -31,8 +31,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('updater-event', (_event, data) => callback(data));
   },
   saveRawResult: (data: { sessionId?: string; rawContent: string; conversationId?: string }) => ipcRenderer.invoke('save-raw-result', data),
+  saveFailedPage: (failedPage: FailedPage) => ipcRenderer.invoke('save-failed-page', failedPage),
+  getFailedPages: () => ipcRenderer.invoke('get-failed-pages'),
+  removeFailedPage: (pageNumber: number, sessionId: string) => ipcRenderer.invoke('remove-failed-page', pageNumber, sessionId),
   getApiToken: () => ipcRenderer.invoke('get-api-token'),
   getNgrokSettings: () => ipcRenderer.invoke('get-ngrok-settings'),
   configureNgrok: (token: string, port: number, domain: string) => ipcRenderer.invoke('configure-ngrok', token, port, domain),
   syncSessionToServer: (serverUrl: string, password: string) => ipcRenderer.invoke('sync-session-to-server', serverUrl, password),
+  getLogs: () => ipcRenderer.invoke('get-logs'),
+  clearLogs: () => ipcRenderer.invoke('clear-logs'),
 });

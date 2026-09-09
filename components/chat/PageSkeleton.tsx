@@ -12,6 +12,8 @@ type PageSkeletonProps = {
   nowMs: number;
   failedMsg?: string;
   idx: number;
+  onRetry?: () => void;
+  isProcessing?: boolean;
 };
 
 export function formatElapsed(ms: number) {
@@ -33,6 +35,8 @@ export function PageSkeleton({
   nowMs,
   failedMsg,
   idx,
+  onRetry,
+  isProcessing,
 }: PageSkeletonProps) {
   const elapsedMs = startTs ? nowMs - startTs : 0;
 
@@ -57,10 +61,16 @@ export function PageSkeleton({
             <div className="max-w-md text-xs text-red-200/80">
               {failedMsg}
             </div>
-            <div className="pt-1 text-[11px] text-red-200/70">
-              Try regenerating this page again once the run finishes.
-            </div>
           </div>
+          {onRetry && (
+            <button
+              onClick={onRetry}
+              disabled={isProcessing}
+              className="mt-2 rounded-lg bg-red-500/20 px-4 py-2 text-sm font-medium text-red-200 transition hover:bg-red-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Try Again
+            </button>
+          )}
         </div>
       </div>
     );

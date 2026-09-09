@@ -1,12 +1,15 @@
 import { ipcMain, dialog, BrowserWindow, nativeImage } from 'electron';
 import fs from 'fs';
 import path from 'path';
-import { NoteRecord, ExportNoteOptions } from '../types';
+import { NoteRecord, ExportNoteOptions, FailedPage } from '../types';
 import {
   getStoredNotes,
   saveNotesCollection,
   getStoredRecords,
   saveImageRecords,
+  saveFailedPage,
+  getFailedPages,
+  removeFailedPage,
   imagesDir,
   resultsDir,
 } from '../utils/storage';
@@ -17,6 +20,7 @@ import {
   escapeHtml,
 } from '../utils/helpers';
 import { CHATGPT_URL, GEMINI_SIGN_IN_URL } from '../windows';
+import { getLogs, clearLogs } from '../utils/logger';
 
 export function registerNotesIpcHandlers(
   getMainWindow: () => BrowserWindow | null,
@@ -247,6 +251,64 @@ export function registerNotesIpcHandlers(
     } catch (err) {
       const error = err as Error;
       console.error('Failed to save raw result file:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('save-failed-page', async (_, failedPage: FailedPage) => {
+    try {
+      await saveFailedPage(failedPage);
+      console.log('[ELECTRON] Failed page saved:', failedPage.pageNumber);
+      return { success: true };
+    } catch (err) {
+      const error = err as Error;
+      console.error('Failed to save failed page:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('get-failed-pages', async () => {
+    try {
+      const failedPages = await getFailedPages();
+      return { success: true, failedPages };
+    } catch (err) {
+      const error = err as Error;
+      console.error('Failed to get failed pages:', error);
+      return { success: false, error: error.message, failedPages: [] };
+    }
+  });
+
+  ipcMain.handle('remove-failed-page', async (_, pageNumber: number, sessionId: string) => {
+    try {
+      await removeFailedPage(pageNumber, sessionId);
+      console.log('[ELECTRON] Failed page removed:', pageNumber);
+      return { success: true };
+    } catch (err) {
+      const error = err as Error;
+      console.error('Failed to remove failed page:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('get-logs', async () => {
+    try {
+      const logs = getLogs();
+      return { success: true, logs };
+    } catch (err) {
+      const error = err as Error;
+      console.error('Failed to get logs:', error);
+      return { success: false, error: error.message, logs: '' };
+    }
+  });
+
+  ipcMain.handle('clear-logs', async () => {
+    try {
+      clearLogs();
+      console.log('[ELECTRON] Logs cleared');
+      return { success: true };
+    } catch (err) {
+      const error = err as Error;
+      console.error('Failed to clear logs:', error);
       return { success: false, error: error.message };
     }
   });

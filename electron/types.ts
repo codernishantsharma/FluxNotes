@@ -34,11 +34,23 @@ export interface ImageRecord {
   source: string;
   generationId?: string;
   fileId?: string;
+  pageNumber?: number;
+  sessionId?: string;
+}
+
+export interface FailedPage {
+  pageNumber: number;
+  subTopicNames: string[];
+  originalTopic: string;
+  sessionId: string;
+  errorMessage?: string;
+  timestamp: number;
 }
 
 export interface NotesData {
   notes_collection: NoteRecord[];
   image_records: ImageRecord[];
+  failed_pages?: FailedPage[];
 }
 
 export interface GeneratedImageInfo {
