@@ -172,6 +172,19 @@ export function startLoginCheckRoutine(resetSessionCallback: () => void): void {
           })();
         `);
       if (hasLoginText) {
+        if (provider === 'chatgpt' && isChatGptUrl(currentUrl)) {
+          // If on ChatGPT login page but styles were previously stripped, reload page so login UI displays properly
+          const missingStyles = await sendWorkerWindow.webContents.executeJavaScript(`
+            (function() {
+              return document.querySelectorAll('style, link[rel="stylesheet"]').length === 0;
+            })();
+          `).catch(() => false);
+          if (missingStyles) {
+            await sendWorkerWindow.loadURL(CHATGPT_URL);
+            return;
+          }
+        }
+
         if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
           console.log('[ELECTRON] Hiding main window due to login page detection.');
           mainWindow.hide();
@@ -182,8 +195,27 @@ export function startLoginCheckRoutine(resetSessionCallback: () => void): void {
           sendWorkerWindow.focus();
         }
       } else {
-        if (sendWorkerWindow && !sendWorkerWindow.isDestroyed() && sendWorkerWindow.isVisible()) {
-          sendWorkerWindow.hide();
+        if (sendWorkerWindow && !sendWorkerWindow.isDestroyed()) {
+          if (sendWorkerWindow.isVisible()) {
+            sendWorkerWindow.hide();
+          }
+
+          if (provider === 'chatgpt' && isChatGptUrl(currentUrl)) {
+            // PERFORMANCE OPTIMIZATION: Strip all CSS from chatgpt.com when user is logged in.
+            // Disabling and removing CSS styles in background worker window reduces layout recalculations,
+            // GPU memory overhead, and background CPU utilization while retaining full API fetch capability.
+            await sendWorkerWindow.webContents.executeJavaScript(`
+              (function() {
+                try {
+                  const styleElements = document.querySelectorAll('style, link[rel="stylesheet"]');
+                  styleElements.forEach(el => el.remove());
+                  for (let i = 0; i < document.styleSheets.length; i++) {
+                    try { document.styleSheets[i].disabled = true; } catch (_) {}
+                  }
+                } catch (_) {}
+              })();
+            `).catch(() => {});
+          }
         }
         if (mainWindow && !mainWindow.isVisible() && !mainWindow.isMinimized()) {
           mainWindow.show();
