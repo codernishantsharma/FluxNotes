@@ -172,7 +172,7 @@ export default function NewChatPage() {
                     : `local://${encodeURI(image.replace(/\\/g, '/'))}`,
                 };
               } else if (image && typeof image === 'object' && 'filePath' in image) {
-                const pageNumber = typeof image.pageNumber === 'number' ? image.pageNumber : index + 1;
+                const pageNumber = 'pageNumber' in image && typeof image.pageNumber === 'number' ? image.pageNumber : index + 1;
                 return {
                   pageNumber,
                   filePath: typeof image.filePath === 'string' && image.filePath.startsWith('local://')
@@ -182,7 +182,12 @@ export default function NewChatPage() {
               }
               return null;
             })
-            .filter((image): image is { pageNumber: number; filePath: string } => image !== null)
+            .filter((image: unknown): image is { pageNumber: number; filePath: string } => 
+              image !== null && 
+              typeof image === 'object' && 
+              'filePath' in image && 
+              'pageNumber' in image
+            )
           : [];
 
         pageImagesRef.current = savedImages;

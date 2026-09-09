@@ -169,6 +169,7 @@ electron/ai/gemini.js
 electron/ai/index.js
 electron/utils/helpers.js
 electron/utils/storage.js
+electron/utils/logger.js
 
 docker-server/user_data_test
 docker-server/logs_test

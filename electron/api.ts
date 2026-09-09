@@ -283,10 +283,14 @@ async function notesPayload(): Promise<unknown[]> {
   return notes.map((note) => ({
     ...note,
     images: (note.images || []).flatMap((image) => {
-      const imagePath = path.resolve(fromLocalImageUrl(image));
+      // Handle both old format (string) and new format (object with filePath and pageNumber)
+      const imagePath = typeof image === 'string' 
+        ? fromLocalImageUrl(image) 
+        : fromLocalImageUrl(image.filePath);
+      const resolvedPath = path.resolve(imagePath);
       const imagesRoot = path.resolve(imagesDir);
-      return imagePath.startsWith(`${imagesRoot}${path.sep}`) && existsSync(imagePath)
-        ? [imageDataUrl(imagePath)]
+      return resolvedPath.startsWith(`${imagesRoot}${path.sep}`) && existsSync(resolvedPath)
+        ? [imageDataUrl(resolvedPath)]
         : [];
     }),
   }));

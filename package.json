@@ -123,7 +123,7 @@
     "@types/ws": "^8.18.1",
     "electron-serve": "^3.0.1",
     "electron-updater": "^6.8.9",
-    "next": "16.3.3",
+    "next": "^16.3.4",
     "puppeteer-core": "^25.9.0",
     "qrcode": "^1.5.4",
     "react": "19.2.8",
