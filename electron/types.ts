@@ -62,6 +62,12 @@ export interface ChatGptResult {
   fileId: string | null;
   generatedImages: GeneratedImageInfo[];
   downloadedSandboxImages: GeneratedImageInfo[];
+  generatedAssetImages?: {
+    fileId: string;
+    mimeType: string;
+    size: number;
+    downloadUrl: string;
+  }[];
 }
 
 export type AIProvider = 'chatgpt' | 'gemini';

@@ -1,6 +1,6 @@
 import path from 'path';
 import fs from 'fs';
-import { BrowserWindow } from 'electron';
+import { BrowserWindow, net } from 'electron';
 import { AIProvider, ChatGptResult, ChatSession } from '../types';
 import { createChatSessionId, safeFileName, extractJsonFromResponse, completeTruncatedJson, completeNotePayload, toLocalImageUrl } from '../utils/helpers';
 import { writeRawResponse, appendToResultJson, saveRecordToDb, imagesDir } from '../utils/storage';
@@ -98,6 +98,11 @@ export async function processAiPrompt(
   } else {
     await injectChatGptEngineIfNeeded(workerWindow);
 
+    // Register storage for asset_pointer generated images
+    await workerWindow.webContents.executeJavaScript(`
+      window.__fluxnotesGeneratedAssetImages = [];
+    `);
+
     result = await workerWindow.webContents.executeJavaScript(`
       (async function() {
         if (!window.__fluxnotesChatGPT) {
@@ -137,46 +142,6 @@ export async function processAiPrompt(
         console.log("[INJECTION] Sending user query to the same conversation thread...");
         let finalOutput = await window.__fluxnotesChatGPT.send(usrText, 'chatgpt', messageAttachments, sessionId);
         const finalText = String(finalOutput && finalOutput.text ? finalOutput.text : "").trim();
-
-        const pageNo = ${JSON.stringify(pageNumber)};
-
-        const sendImageInfoWithRetry = async function () {
-          const rename = pageNo ? pageNo + ".png" : "";
-          const payload = JSON.stringify({ status: "SEND_IMAGE_INFO", rename: rename });
-          const TIMEOUT_MS = 2 * 60 * 1000;
-          const MAX_ATTEMPTS = 10;
-          let lastOutput = null;
-
-          for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-            try {
-              const output = await Promise.race([
-                window.__fluxnotesChatGPT.send(payload, 'chatgpt', null, sessionId),
-                new Promise(function (_, reject) {
-                  setTimeout(function () {
-                    reject(new Error("SEND_IMAGE_INFO timed out after 2 minutes"));
-                  }, TIMEOUT_MS);
-                }),
-              ]);
-              lastOutput = output;
-              const text = String(output && output.text ? output.text : "").trim();
-              if (text) {
-                return output;
-              }
-              console.log("[INJECTION] Empty SEND_IMAGE_INFO response. Sending again...", { attempt, rename });
-            } catch (error) {
-              const message = error && error.message ? error.message : String(error);
-              console.warn("[INJECTION] SEND_IMAGE_INFO failed. Sending again...", { attempt, rename, reason: message });
-            }
-          }
-
-          console.error("[INJECTION] SEND_IMAGE_INFO exhausted retries.", { rename, attempts: MAX_ATTEMPTS });
-          return lastOutput;
-        };
-
-        if (!finalText) {
-          console.log("[INJECTION] Empty image response text. Sending SEND_IMAGE_INFO request.");
-          finalOutput = await sendImageInfoWithRetry();
-        }
 
         const activeConvoId = finalOutput.conversationId || window.__fluxnotesChatGPT.getConversationId(sessionId);
         const useMessageId = finalOutput.messageId || null;
@@ -281,6 +246,11 @@ export async function processAiPrompt(
         }
         const downloadedImages = sandboxDownloads.length ? await Promise.all(sandboxDownloads) : [];
 
+        // Wait a bit for asset_pointer images to download
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        
+        const generatedAssetImages = window.__fluxnotesGeneratedAssetImages || [];
+
         return {
           rawText: finalOutput.text || finalOutput,
           messageId: useMessageId,
@@ -290,13 +260,14 @@ export async function processAiPrompt(
           fileId: finalOutput.fileId || null,
           generatedImages: dedupedGeneratedImages,
           downloadedSandboxImages: downloadedImages,
+          generatedAssetImages: generatedAssetImages,
         };
       })();
     `);
   }
 
   if (result) {
-    const { rawText = '', conversationId, messageId, session: resSession, generationId, fileId, generatedImages, downloadedSandboxImages } = result;
+    const { rawText = '', conversationId, messageId, session: resSession, generationId, fileId, generatedImages, downloadedSandboxImages, generatedAssetImages } = result;
     session = resSession || session;
 
     await writeRawResponse({
@@ -343,6 +314,88 @@ export async function processAiPrompt(
         } catch (saveErr) {
           const err = saveErr as Error;
           console.error('[ELECTRON] Failed to save sandbox image locally:', err.message);
+        }
+      }
+    }
+
+    // Handle images generated via asset_pointer
+    if (Array.isArray(generatedAssetImages) && generatedAssetImages.length > 0) {
+      for (const img of generatedAssetImages) {
+        if (!img || !img.downloadUrl) continue;
+        
+        try {
+          console.log('[ELECTRON] Downloading asset image from URL:', img.downloadUrl);
+          
+          // Get the worker window session for authentication
+          const workerWindowSession = workerWindow.webContents.session;
+          const cookies = await workerWindowSession.cookies.get({ domain: 'chatgpt.com' });
+          const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+          
+          // Download the image using Electron's net module
+          const imageBuffer = await new Promise<Buffer>((resolve, reject) => {
+            const request = net.request({
+              method: 'GET',
+              url: img.downloadUrl,
+              session: workerWindowSession,
+            });
+            
+            request.setHeader('Cookie', cookieHeader);
+            
+            request.on('response', (response) => {
+              if (response.statusCode !== 200) {
+                reject(new Error(`HTTP ${response.statusCode}`));
+                return;
+              }
+              
+              const chunks: Buffer[] = [];
+              response.on('data', (chunk) => {
+                chunks.push(chunk);
+              });
+              
+              response.on('end', () => {
+                resolve(Buffer.concat(chunks));
+              });
+            });
+            
+            request.on('error', (error) => {
+              reject(error);
+            });
+            
+            request.end();
+          });
+          
+          const ext = (img.mimeType && img.mimeType.split('/')[1]) || 'png';
+          const safeExt = ext === 'jpeg' ? 'jpg' : ext.replace(/[^a-zA-Z0-9]/g, '');
+          const usedFileId = String(img.fileId || fileId || generationId || messageId || 'unknown');
+          const noteIdValue = String(sessionId || messageId || 'note');
+          const fileName = `image_${safeFileName(noteIdValue)}_${safeFileName(usedFileId)}.${safeExt}`;
+          const filePath = path.join(imagesDir, fileName);
+          
+          console.log('[ELECTRON] Saving downloaded asset image to disk:', {
+            fileId: img.fileId || fileId || null,
+            generationId: generationId || null,
+            destination: filePath,
+          });
+          
+          fs.writeFileSync(filePath, imageBuffer);
+          console.log('[ELECTRON] Asset image saved locally:', filePath);
+          
+          await saveRecordToDb({ 
+            id: usedFileId, 
+            filePath, 
+            timestamp: Date.now(), 
+            source: 'asset_pointer', 
+            generationId: generationId || undefined, 
+            fileId: img.fileId || fileId || undefined 
+          });
+          
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('new-image', { filePath: toLocalImageUrl(filePath), pageNumber: null });
+            console.log('[ELECTRON] Sent new-image event with local path:', toLocalImageUrl(filePath));
+          }
+        } catch (downloadErr) {
+          const err = downloadErr as Error;
+          console.error('[ELECTRON] Failed to download and save asset image:', err.message);
         }
       }
     }

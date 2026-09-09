@@ -164,9 +164,9 @@ electron/types.js
 electron/windows.js
 electron/ipc/notes.js
 electron/ipc/updater.js
-electron/ipc/ai/chatgpt.js
-electron/ipc/ai/gemini.js
-electron/ipc/ai/index.js
+electron/ai/chatgpt.js
+electron/ai/gemini.js
+electron/ai/index.js
 electron/utils/helpers.js
 electron/utils/storage.js
 

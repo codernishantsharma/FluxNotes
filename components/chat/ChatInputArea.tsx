@@ -1,9 +1,18 @@
 /* eslint-disable @next/next/no-img-element */
 'use client';
 
-import React, { RefObject } from 'react';
+import React, { RefObject, useState, useEffect, useMemo } from 'react';
 import { AssistantData, AIProvider } from '@/types/notes';
 import { FileTypeIcon, formatFileSize, getFileKind } from './FileTypeIcon';
+
+const TYPING_HINTS = [
+  'Generate study notes on...',
+  'Create detailed diagrams of...',
+  'Explain the concept of...',
+  'Summarize the key points of...',
+  'Design visual aids for...',
+  'Break down the topic of...',
+];
 
 type ChatInputAreaProps = {
   inputText: string;
@@ -38,6 +47,23 @@ export function ChatInputArea({
   onFileChange,
   onKeyDown,
 }: ChatInputAreaProps) {
+  const [hintIndex, setHintIndex] = useState(0);
+  
+  // Calculate current typing hint based on conditions
+  const typingHint = useMemo(() => {
+    if (isProcessing || inputText) return '';
+    return TYPING_HINTS[hintIndex];
+  }, [isProcessing, inputText, hintIndex]);
+
+  useEffect(() => {
+    if (!isProcessing && !inputText) {
+      const interval = setInterval(() => {
+        setHintIndex((prev) => (prev + 1) % TYPING_HINTS.length);
+      }, 3000);
+      return () => clearInterval(interval);
+    }
+  }, [isProcessing, inputText]);
+
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex flex-col items-center px-0 pb-4 sm:pb-6 lg:pb-10">
       <div className={`pointer-events-none relative flex w-full flex-col gap-3 px-3 transition-all duration-300 sm:px-5 ${assistantData ? 'pr-64 sm:pr-80' : ''}`}>
@@ -64,6 +90,20 @@ export function ChatInputArea({
 
         {/* Input Text Box */}
         <div className="pointer-events-auto relative mx-auto mt-1 w-full max-w-4xl">
+          {/* Bubble Dot Animation */}
+          {isProcessing && (
+            <div className="mb-3 flex justify-center">
+              <div className="flex items-center gap-2">
+                <div className="flex gap-1">
+                  <div className="h-2 w-2 animate-bounce rounded-full bg-teal-400" style={{ animationDelay: '0ms' }} />
+                  <div className="h-2 w-2 animate-bounce rounded-full bg-cyan-400" style={{ animationDelay: '150ms' }} />
+                  <div className="h-2 w-2 animate-bounce rounded-full bg-teal-300" style={{ animationDelay: '300ms' }} />
+                </div>
+                <span className="text-xs text-teal-200 animate-pulse">Generating your notes...</span>
+              </div>
+            </div>
+          )}
+          
           <div className="pointer-events-none absolute -inset-1 rounded-full bg-teal-500/15 blur-2xl transition-all duration-300" />
           <div className="pointer-events-none absolute -inset-2 rounded-full bg-cyan-400/10 blur-[30px] transition-all duration-300" />
 
@@ -97,7 +137,7 @@ export function ChatInputArea({
             </div>
           )}
           {attachmentError && <p className="mb-2 text-center text-xs text-red-300">{attachmentError}</p>}
-          <div className="relative flex items-end rounded-xl border border-teal-500/30 bg-[#111217]/80 pr-2 shadow-2xl backdrop-blur-xl focus-within:border-cyan-400/50">
+          <div className="relative flex items-end rounded-xl border border-teal-500/30 bg-[#111217]/80 pr-2 shadow-2xl backdrop-blur-xl focus-within:border-cyan-400/50 focus-within:shadow-[0_0_30px_rgba(45,212,191,0.3)] transition-all duration-300 focus-within:animate-gradient-glow">
             {provider === 'chatgpt' && (
               <>
                 <input id="chat-attachment" type="file" multiple onChange={onFileChange} disabled={isProcessing || selectedFiles.length >= 10} className="sr-only" />
@@ -118,7 +158,7 @@ export function ChatInputArea({
               onKeyDown={onKeyDown}
               rows={1}
               disabled={isProcessing}
-              placeholder={isProcessing ? 'Responding ...' : 'Type your prompt to generate your notes'}
+              placeholder={isProcessing ? 'Responding ...' : typingHint || 'Type your prompt to generate your notes'}
               className="relative min-h-14 min-w-0 flex-1 resize-none rounded-xl bg-transparent px-4 py-4 text-sm leading-6 text-white outline-none placeholder-slate-400 disabled:cursor-not-allowed disabled:opacity-90"
             />
           </div>
@@ -127,6 +167,32 @@ export function ChatInputArea({
           )}
         </div>
       </div>
+      
+      {/* CSS Animations */}
+      <style jsx>{`
+        @keyframes gradient-border {
+          0% { background-position: 0% 50%; }
+          50% { background-position: 100% 50%; }
+          100% { background-position: 0% 50%; }
+        }
+        
+        .animate-gradient-border {
+          animation: gradient-border 3s ease infinite;
+        }
+        
+        @keyframes gradient-glow {
+          0%, 100% { 
+            box-shadow: 0 0 20px rgba(45, 212, 191, 0.3), 0 0 40px rgba(34, 211, 238, 0.2);
+          }
+          50% { 
+            box-shadow: 0 0 30px rgba(45, 212, 191, 0.5), 0 0 60px rgba(34, 211, 238, 0.3);
+          }
+        }
+        
+        .animate-gradient-glow {
+          animation: gradient-glow 3s ease infinite;
+        }
+      `}</style>
     </div>
   );
 }

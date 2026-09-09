@@ -148,5 +148,381 @@
     "fileId": null,
     "response": "**Initiating Handwriting Generation**\n\nI'm starting the handwritten note image sequence. The input specifies the first image as an introductory note on Trigonometry, including a section on trigonometric ratios. This initial stage requires me to interpret and format the note content for a handwritten style. I must ensure the content accurately reflects the provided sub-topics and status.\n\n\n",
     "generatedImages": []
+  },
+  {
+    "timestamp": "2026-09-09T12:52:12.467Z",
+    "sessionId": "90a74edd-26e0-451f-bcaa-60ed259e3da1",
+    "error": "An object could not be cloned.",
+    "errorStack": "Error: An object could not be cloned.\n    at IpcRendererInternal.send (node:electron/js2c/sandbox_bundle:2:100569)\n    at IpcRendererInternal.<anonymous> (node:electron/js2c/sandbox_bundle:2:100174)"
+  },
+  {
+    "timestamp": "2026-09-09T12:52:23.158Z",
+    "sessionId": "90a74edd-26e0-451f-bcaa-60ed259e3da1",
+    "error": "An object could not be cloned.",
+    "errorStack": "Error: An object could not be cloned.\n    at IpcRendererInternal.send (node:electron/js2c/sandbox_bundle:2:100569)\n    at IpcRendererInternal.<anonymous> (node:electron/js2c/sandbox_bundle:2:100174)"
+  },
+  {
+    "timestamp": "2026-09-09T12:56:42.471Z",
+    "sessionId": "7d69d129-5fa7-490f-85da-c5bcbc7e1c4e",
+    "messageId": "4fb937fa-3c60-4864-80bf-7d5c3c19520b",
+    "conversationId": "6aa1577b-328c-83ee-9954-6df2f34e87d7",
+    "generationId": null,
+    "fileId": null,
+    "response": "```json\n{\n  \"status\": \"new\",\n  \"topicName\": \"Class 10 Trigonometry (ICSE)\",\n  \"topicId\": \"8f4a92d7c6e14b53\",\n  \"subTopics\": [\n    {\n      \"names\": [\n        \"Introduction to Trigonometry\",\n        \"Trigonometric Ratios\"\n      ],\n      \"pageNumber\": \"1\"\n    },\n    {\n      \"names\": [\n        \"Trigonometric Values of Standard Angles\",\n        \"Trigonometric Tables\"\n      ],\n      \"pageNumber\": \"2\"\n    },\n    {\n      \"names\": [\n        \"Trigonometric Identities\",\n        \"Problems Based on Identities\"\n      ],\n      \"pageNumber\": \"3\"\n    },\n    {\n      \"names\": [\n        \"Heights and Distances\",\n        \"Applications of Trigonometry\"\n      ],\n      \"pageNumber\": \"4\"\n    }\n  ],\n  \"aiResponse\": \"Do you want to proceed with making handwritten notes for Class 10 ICSE Trigonometry?\",\n  \"recommendedResponse\": [\n    \"Continue\",\n    \"Add more topics\",\n    \"Change class or board\"\n  ]\n}\n```",
+    "generatedImages": []
+  },
+  {
+    "timestamp": "2026-09-09T12:57:35.729Z",
+    "sessionId": "7d69d129-5fa7-490f-85da-c5bcbc7e1c4e",
+    "messageId": "5f7904c6-aa8e-44b3-ae12-f0b010a8a777",
+    "conversationId": "6aa1577b-328c-83ee-9954-6df2f34e87d7",
+    "generationId": null,
+    "fileId": null,
+    "response": {
+      "text": "",
+      "messageId": "5f7904c6-aa8e-44b3-ae12-f0b010a8a777",
+      "conversationId": "6aa1577b-328c-83ee-9954-6df2f34e87d7",
+      "generationId": null,
+      "fileId": null,
+      "generatedImages": []
+    },
+    "generatedImages": []
+  },
+  {
+    "timestamp": "2026-09-09T12:58:21.290Z",
+    "sessionId": "7d69d129-5fa7-490f-85da-c5bcbc7e1c4e",
+    "messageId": "eca85f14-ba9e-4e83-9534-38b9f0a32b85",
+    "conversationId": "6aa1577b-328c-83ee-9954-6df2f34e87d7",
+    "generationId": null,
+    "fileId": null,
+    "response": {
+      "text": "",
+      "messageId": "eca85f14-ba9e-4e83-9534-38b9f0a32b85",
+      "conversationId": "6aa1577b-328c-83ee-9954-6df2f34e87d7",
+      "generationId": null,
+      "fileId": null,
+      "generatedImages": []
+    },
+    "generatedImages": []
+  },
+  {
+    "timestamp": "2026-09-09T13:07:42.169Z",
+    "sessionId": "6f08e812-88fe-4d23-be4c-ba5452b60bee",
+    "messageId": "0352de2d-9088-4fa5-9a0a-872308d00630",
+    "conversationId": "6aa15a0d-b72c-83e9-8c41-ea561aeea1ba",
+    "generationId": null,
+    "fileId": null,
+    "response": "```json\n{\n  \"status\": \"new\",\n  \"topicName\": \"Basic Trigonometry\",\n  \"topicId\": \"5839201746382915\",\n  \"subTopics\": [\n    {\n      \"names\": [\n        \"Introduction to Trigonometry\",\n        \"Trigonometric Ratios\"\n      ],\n      \"pageNumber\": \"1\"\n    },\n    {\n      \"names\": [\n        \"Trigonometric Values of Standard Angles\",\n        \"Trigonometric Tables\"\n      ],\n      \"pageNumber\": \"2\"\n    },\n    {\n      \"names\": [\n        \"Trigonometric Identities\",\n        \"Problems Based on Identities\"\n      ],\n      \"pageNumber\": \"3\"\n    },\n    {\n      \"names\": [\n        \"Applications of Trigonometry\",\n        \"Height and Distance Problems\"\n      ],\n      \"pageNumber\": \"4\"\n    }\n  ],\n  \"aiResponse\": \"Do you want to proceed with these Basic Trigonometry notes for Class 10 CBSE or modify the topics?\",\n  \"recommendedResponse\": [\n    \"Continue\",\n    \"Add more topics\",\n    \"Remove some topics\",\n    \"Change my class or board\"\n  ]\n}\n```",
+    "generatedImages": []
+  },
+  {
+    "timestamp": "2026-09-09T13:08:33.017Z",
+    "sessionId": "6f08e812-88fe-4d23-be4c-ba5452b60bee",
+    "messageId": null,
+    "conversationId": "6aa15a0d-b72c-83e9-8c41-ea561aeea1ba",
+    "generationId": null,
+    "fileId": null,
+    "response": {
+      "text": "",
+      "messageId": null,
+      "conversationId": "6aa15a0d-b72c-83e9-8c41-ea561aeea1ba",
+      "generationId": null,
+      "fileId": null,
+      "generatedImages": []
+    },
+    "generatedImages": []
+  },
+  {
+    "timestamp": "2026-09-09T13:10:55.300Z",
+    "sessionId": "6f08e812-88fe-4d23-be4c-ba5452b60bee",
+    "messageId": "42f6ddea-634d-4266-990d-8a17d19f55d1",
+    "conversationId": "6aa15a0d-b72c-83e9-8c41-ea561aeea1ba",
+    "generationId": null,
+    "fileId": null,
+    "response": {
+      "text": "",
+      "messageId": "42f6ddea-634d-4266-990d-8a17d19f55d1",
+      "conversationId": "6aa15a0d-b72c-83e9-8c41-ea561aeea1ba",
+      "generationId": null,
+      "fileId": null,
+      "generatedImages": []
+    },
+    "generatedImages": []
+  },
+  {
+    "timestamp": "2026-09-09T13:11:42.862Z",
+    "sessionId": "6f08e812-88fe-4d23-be4c-ba5452b60bee",
+    "messageId": "3c31dcd7-75c9-4681-99e7-7a9444595796",
+    "conversationId": "6aa15a0d-b72c-83e9-8c41-ea561aeea1ba",
+    "generationId": null,
+    "fileId": null,
+    "response": {
+      "text": "",
+      "messageId": "3c31dcd7-75c9-4681-99e7-7a9444595796",
+      "conversationId": "6aa15a0d-b72c-83e9-8c41-ea561aeea1ba",
+      "generationId": null,
+      "fileId": null,
+      "generatedImages": []
+    },
+    "generatedImages": []
+  },
+  {
+    "timestamp": "2026-09-09T13:12:34.800Z",
+    "sessionId": "6f08e812-88fe-4d23-be4c-ba5452b60bee",
+    "messageId": "e1ecb2d2-fef4-4556-b002-5d8ec6dc2ecf",
+    "conversationId": "6aa15a0d-b72c-83e9-8c41-ea561aeea1ba",
+    "generationId": null,
+    "fileId": null,
+    "response": {
+      "text": "",
+      "messageId": "e1ecb2d2-fef4-4556-b002-5d8ec6dc2ecf",
+      "conversationId": "6aa15a0d-b72c-83e9-8c41-ea561aeea1ba",
+      "generationId": null,
+      "fileId": null,
+      "generatedImages": []
+    },
+    "generatedImages": []
+  },
+  {
+    "timestamp": "2026-09-09T13:16:11.580Z",
+    "sessionId": "09050bf7-17c2-4125-b5b3-e295a79927d0",
+    "messageId": "1b57e066-31e0-4706-bc4a-23f85f21dd10",
+    "conversationId": "6aa15c0c-a548-83ee-8014-b41a8af6dc9b",
+    "generationId": null,
+    "fileId": null,
+    "response": "```json\n{\n  \"status\": \"new\",\n  \"topicName\": \"Basic Trigonometry\",\n  \"topicId\": \"a7f4c9e2b8d61350\",\n  \"subTopics\": [\n    {\n      \"names\": [\n        \"Introduction to Trigonometry\",\n        \"Trigonometric Ratios\"\n      ],\n      \"pageNumber\": \"1\"\n    },\n    {\n      \"names\": [\n        \"Trigonometric Ratios of an Angle\",\n        \"Values of Trigonometric Ratios\"\n      ],\n      \"pageNumber\": \"2\"\n    },\n    {\n      \"names\": [\n        \"Trigonometric Values of Standard Angles\",\n        \"Trigonometric Tables\"\n      ],\n      \"pageNumber\": \"3\"\n    },\n    {\n      \"names\": [\n        \"Trigonometric Identities\",\n        \"Problems Based on Identities\"\n      ],\n      \"pageNumber\": \"4\"\n    },\n    {\n      \"names\": [\n        \"Applications of Trigonometry\",\n        \"Height and Distance Problems\"\n      ],\n      \"pageNumber\": \"5\"\n    }\n  ],\n  \"aiResponse\": \"Do you want to proceed with creating handwritten notes for Basic Trigonometry or modify the topic list?\",\n  \"recommendedResponse\": [\n    \"Continue\",\n    \"Add more topics\",\n    \"Change my class or board\",\n    \"Modify subtopics\"\n  ]\n}\n```",
+    "generatedImages": []
+  },
+  {
+    "timestamp": "2026-09-09T13:17:05.435Z",
+    "sessionId": "09050bf7-17c2-4125-b5b3-e295a79927d0",
+    "messageId": null,
+    "conversationId": "6aa15c0c-a548-83ee-8014-b41a8af6dc9b",
+    "generationId": null,
+    "fileId": null,
+    "response": {
+      "text": "",
+      "messageId": null,
+      "conversationId": "6aa15c0c-a548-83ee-8014-b41a8af6dc9b",
+      "generationId": null,
+      "fileId": null,
+      "generatedImages": []
+    },
+    "generatedImages": []
+  },
+  {
+    "timestamp": "2026-09-09T13:17:51.784Z",
+    "sessionId": "09050bf7-17c2-4125-b5b3-e295a79927d0",
+    "messageId": "7e9da98b-5ab7-498b-a348-60989b38ce7f",
+    "conversationId": "6aa15c0c-a548-83ee-8014-b41a8af6dc9b",
+    "generationId": null,
+    "fileId": null,
+    "response": {
+      "text": "",
+      "messageId": "7e9da98b-5ab7-498b-a348-60989b38ce7f",
+      "conversationId": "6aa15c0c-a548-83ee-8014-b41a8af6dc9b",
+      "generationId": null,
+      "fileId": null,
+      "generatedImages": []
+    },
+    "generatedImages": []
+  },
+  {
+    "timestamp": "2026-09-09T13:18:52.974Z",
+    "sessionId": "5d4c64ff-d973-4d4e-9059-5326195e623e",
+    "messageId": "4d5c7946-1aa2-45a0-b1e8-00ce0baf140d",
+    "conversationId": "6aa15ca8-6e80-83ee-a31d-3364c212141d",
+    "generationId": null,
+    "fileId": null,
+    "response": "```json\n{\n  \"status\": \"new\",\n  \"topicName\": \"Class 10th Basic Trigonometry\",\n  \"topicId\": \"5839201746382915\",\n  \"subTopics\": [\n    {\n      \"names\": [\n        \"Introduction to Trigonometry\",\n        \"Trigonometric Ratios of an Angle\"\n      ],\n      \"pageNumber\": \"1\"\n    },\n    {\n      \"names\": [\n        \"Values of Trigonometric Ratios\",\n        \"Trigonometric Values of Standard Angles\"\n      ],\n      \"pageNumber\": \"2\"\n    },\n    {\n      \"names\": [\n        \"Trigonometric Identities\",\n        \"Problems Based on Identities\"\n      ],\n      \"pageNumber\": \"3\"\n    },\n    {\n      \"names\": [\n        \"Applications of Trigonometry\",\n        \"Height and Distance Problems\"\n      ],\n      \"pageNumber\": \"4\"\n    }\n  ],\n  \"aiResponse\": \"Do you want to proceed with these topics and start creating the handwritten notes?\",\n  \"recommendedResponse\": [\n    \"Continue\",\n    \"Add more topics\",\n    \"Change my class level\",\n    \"Modify subtopics\"\n  ]\n}\n```",
+    "generatedImages": []
+  },
+  {
+    "timestamp": "2026-09-09T13:19:39.309Z",
+    "sessionId": "5d4c64ff-d973-4d4e-9059-5326195e623e",
+    "messageId": null,
+    "conversationId": "6aa15ca8-6e80-83ee-a31d-3364c212141d",
+    "generationId": null,
+    "fileId": null,
+    "response": {
+      "text": "",
+      "messageId": null,
+      "conversationId": "6aa15ca8-6e80-83ee-a31d-3364c212141d",
+      "generationId": null,
+      "fileId": null,
+      "generatedImages": []
+    },
+    "generatedImages": []
+  },
+  {
+    "timestamp": "2026-09-09T13:20:23.048Z",
+    "sessionId": "5d4c64ff-d973-4d4e-9059-5326195e623e",
+    "messageId": "ccbb1b8b-e755-4b24-81a7-f9cfdd79aee7",
+    "conversationId": "6aa15ca8-6e80-83ee-a31d-3364c212141d",
+    "generationId": null,
+    "fileId": null,
+    "response": {
+      "text": "",
+      "messageId": "ccbb1b8b-e755-4b24-81a7-f9cfdd79aee7",
+      "conversationId": "6aa15ca8-6e80-83ee-a31d-3364c212141d",
+      "generationId": null,
+      "fileId": null,
+      "generatedImages": []
+    },
+    "generatedImages": []
+  },
+  {
+    "timestamp": "2026-09-09T13:21:13.858Z",
+    "sessionId": "5d4c64ff-d973-4d4e-9059-5326195e623e",
+    "messageId": "88fe8014-ed8b-447d-82b0-0283525d1b76",
+    "conversationId": "6aa15ca8-6e80-83ee-a31d-3364c212141d",
+    "generationId": null,
+    "fileId": null,
+    "response": {
+      "text": "",
+      "messageId": "88fe8014-ed8b-447d-82b0-0283525d1b76",
+      "conversationId": "6aa15ca8-6e80-83ee-a31d-3364c212141d",
+      "generationId": null,
+      "fileId": null,
+      "generatedImages": []
+    },
+    "generatedImages": []
+  },
+  {
+    "timestamp": "2026-09-09T13:22:02.882Z",
+    "sessionId": "5d4c64ff-d973-4d4e-9059-5326195e623e",
+    "messageId": "c3b91e9d-fd28-4b6b-a457-15bcab0174d9",
+    "conversationId": "6aa15ca8-6e80-83ee-a31d-3364c212141d",
+    "generationId": null,
+    "fileId": null,
+    "response": {
+      "text": "",
+      "messageId": "c3b91e9d-fd28-4b6b-a457-15bcab0174d9",
+      "conversationId": "6aa15ca8-6e80-83ee-a31d-3364c212141d",
+      "generationId": null,
+      "fileId": null,
+      "generatedImages": []
+    },
+    "generatedImages": []
+  },
+  {
+    "timestamp": "2026-09-09T13:23:48.715Z",
+    "sessionId": "988aa024-3f94-478b-a172-841ce3ff4080",
+    "messageId": "aa438173-ea9e-4ea4-9a57-2cf332c28215",
+    "conversationId": "6aa15dcc-fdb0-83ee-b192-9ca0ecc1f546",
+    "generationId": null,
+    "fileId": null,
+    "response": "```json\n{\n  \"status\": \"new\",\n  \"topicName\": \"Class 10 Basic Trigonometry (CBSE)\",\n  \"topicId\": \"5839201746382915\",\n  \"subTopics\": [\n    {\n      \"names\": [\n        \"Introduction to Trigonometry\",\n        \"Trigonometric Ratios in a Right-Angled Triangle\"\n      ],\n      \"pageNumber\": \"1\"\n    },\n    {\n      \"names\": [\n        \"Values of Trigonometric Ratios\",\n        \"Trigonometric Ratios of Standard Angles\"\n      ],\n      \"pageNumber\": \"2\"\n    },\n    {\n      \"names\": [\n        \"Trigonometric Identities\",\n        \"Problems Based on Identities\"\n      ],\n      \"pageNumber\": \"3\"\n    },\n    {\n      \"names\": [\n        \"Applications of Trigonometry\",\n        \"Height and Distance Problems\"\n      ],\n      \"pageNumber\": \"4\"\n    }\n  ],\n  \"aiResponse\": \"Do you want to proceed with creating handwritten notes for this topic or make any changes to the chapter structure?\",\n  \"recommendedResponse\": [\n    \"Continue\",\n    \"Add more topics\",\n    \"Change class or board\",\n    \"Modify chapter structure\"\n  ]\n}\n```",
+    "generatedImages": []
+  },
+  {
+    "timestamp": "2026-09-09T13:24:39.223Z",
+    "sessionId": "988aa024-3f94-478b-a172-841ce3ff4080",
+    "messageId": "d4031dae-17bc-4cd7-b867-3ae4a25aaeae",
+    "conversationId": "6aa15dcc-fdb0-83ee-b192-9ca0ecc1f546",
+    "generationId": null,
+    "fileId": "file_00000000428c821196d15044b5925861",
+    "response": {
+      "text": "",
+      "messageId": "d4031dae-17bc-4cd7-b867-3ae4a25aaeae",
+      "conversationId": "6aa15dcc-fdb0-83ee-b192-9ca0ecc1f546",
+      "generationId": null,
+      "fileId": "file_00000000428c821196d15044b5925861",
+      "generatedImages": [
+        {
+          "fileId": "file_00000000428c821196d15044b5925861"
+        }
+      ]
+    },
+    "generatedImages": [
+      {
+        "fileId": "file_00000000428c821196d15044b5925861"
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-09-09T13:25:49.085Z",
+    "sessionId": "988aa024-3f94-478b-a172-841ce3ff4080",
+    "messageId": "fada827d-15a6-4fac-a791-a7ab968eeb3b",
+    "conversationId": "6aa15dcc-fdb0-83ee-b192-9ca0ecc1f546",
+    "generationId": null,
+    "fileId": "file_00000000ffc481f4add921f44bc65434",
+    "response": {
+      "text": "",
+      "messageId": "fada827d-15a6-4fac-a791-a7ab968eeb3b",
+      "conversationId": "6aa15dcc-fdb0-83ee-b192-9ca0ecc1f546",
+      "generationId": null,
+      "fileId": "file_00000000ffc481f4add921f44bc65434",
+      "generatedImages": [
+        {
+          "fileId": "file_00000000ffc481f4add921f44bc65434"
+        }
+      ]
+    },
+    "generatedImages": [
+      {
+        "fileId": "file_00000000ffc481f4add921f44bc65434"
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-09-09T13:27:18.162Z",
+    "sessionId": "988aa024-3f94-478b-a172-841ce3ff4080",
+    "messageId": "f17745b2-d2e9-4baf-911c-37e27c934a2a",
+    "conversationId": "6aa15dcc-fdb0-83ee-b192-9ca0ecc1f546",
+    "generationId": null,
+    "fileId": "file_00000000ecc08208a7acd408e11a5fb4",
+    "response": {
+      "text": "",
+      "messageId": "f17745b2-d2e9-4baf-911c-37e27c934a2a",
+      "conversationId": "6aa15dcc-fdb0-83ee-b192-9ca0ecc1f546",
+      "generationId": null,
+      "fileId": "file_00000000ecc08208a7acd408e11a5fb4",
+      "generatedImages": [
+        {
+          "fileId": "file_00000000ecc08208a7acd408e11a5fb4"
+        }
+      ]
+    },
+    "generatedImages": [
+      {
+        "fileId": "file_00000000ecc08208a7acd408e11a5fb4"
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-09-09T13:28:16.690Z",
+    "sessionId": "988aa024-3f94-478b-a172-841ce3ff4080",
+    "messageId": "fc677a9a-cf29-4f26-a979-2dc69dbdce6c",
+    "conversationId": "6aa15dcc-fdb0-83ee-b192-9ca0ecc1f546",
+    "generationId": null,
+    "fileId": "file_000000006120820885c9e505c104a2b8",
+    "response": {
+      "text": "",
+      "messageId": "fc677a9a-cf29-4f26-a979-2dc69dbdce6c",
+      "conversationId": "6aa15dcc-fdb0-83ee-b192-9ca0ecc1f546",
+      "generationId": null,
+      "fileId": "file_000000006120820885c9e505c104a2b8",
+      "generatedImages": [
+        {
+          "fileId": "file_000000006120820885c9e505c104a2b8"
+        }
+      ]
+    },
+    "generatedImages": [
+      {
+        "fileId": "file_000000006120820885c9e505c104a2b8"
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-09-09T13:34:59.426Z",
+    "sessionId": "f20e9945-2566-450e-9046-40b50ab976bf",
+    "messageId": "262f6d42-c3fe-48ae-9123-df2977882cc4",
+    "conversationId": "6aa16073-2b3c-83ee-8870-2de70297eb36",
+    "generationId": null,
+    "fileId": null,
+    "response": "```json\n{\n  \"status\": \"new\",\n  \"topicName\": \"Basic Trigonometry (Class 10 CBSE)\",\n  \"topicId\": \"7f3a9c2d8e4b1a65\",\n  \"subTopics\": [\n    {\n      \"names\": [\n        \"Introduction to Trigonometry\",\n        \"Trigonometric Ratios in a Right Angled Triangle\"\n      ],\n      \"pageNumber\": \"1\"\n    },\n    {\n      \"names\": [\n        \"Trigonometric Ratios of an Angle\",\n        \"Values of Trigonometric Ratios\"\n      ],\n      \"pageNumber\": \"2\"\n    },\n    {\n      \"names\": [\n        \"Trigonometric Values of Standard Angles\",\n        \"Trigonometric Tables\"\n      ],\n      \"pageNumber\": \"3\"\n    },\n    {\n      \"names\": [\n        \"Trigonometric Identities\",\n        \"Problems Based on Identities\"\n      ],\n      \"pageNumber\": \"4\"\n    },\n    {\n      \"names\": [\n        \"Trigonometric Ratios of Complementary Angles\",\n        \"Applications of Trigonometry\"\n      ],\n      \"pageNumber\": \"5\"\n    }\n  ],\n  \"aiResponse\": \"Do you want to proceed with these topics and start making handwritten notes?\",\n  \"recommendedResponse\": [\n    \"Continue\",\n    \"Add more topics\",\n    \"Remove some topics\",\n    \"Change class or board\"\n  ]\n}\n```",
+    "generatedImages": []
   }
 ]

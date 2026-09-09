@@ -367,6 +367,7 @@
     var sandboxImagePaths = [];
     var buffer = "";
 
+
     try {
       while (true) {
         var chunk = await reader.read();
@@ -384,13 +385,118 @@
 
           try {
             var parsed = JSON.parse(data);
-
+            console.log(data)
             if (parsed.conversation_id) {
               _conversationId = parsed.conversation_id;
             }
 
             if (!generationId && parsed.message && parsed.message.generation_id) {
               generationId = parsed.message.generation_id;
+            }
+
+            // Handle image generation data with asset_pointer from direct message structure
+            if (parsed.message && parsed.message.content && parsed.message.content.parts) {
+              try {
+                var parts = parsed.message.content.parts;
+                for (var pi = 0; pi < parts.length; pi++) {
+                  var part = parts[pi];
+                  if (part && part.content_type === "image_asset_pointer" && part.asset_pointer) {
+                    var assetPointer = part.asset_pointer;
+                    var fileId = assetPointer.replace(/^sediment:\/\//, "");
+                    console.log("[FluxNotes ChatGPT] Found asset_pointer data:", JSON.stringify(parsed, null, 2));
+                    console.log("[FluxNotes ChatGPT] Extracted file ID from asset_pointer:", fileId);
+                    
+                    // Download the image using the fileId
+                    (async function() {
+                      try {
+                        var token = await _getToken();
+                        var deviceId = "";
+                        try {
+                          var cookies = document.cookie.split(";");
+                          for (var i = 0; i < cookies.length; i++) {
+                            var c = cookies[i].trim();
+                            if (c.startsWith("oai-did=")) {
+                              deviceId = c.substring(8);
+                              break;
+                            }
+                          }
+                        } catch (e) {}
+                        
+                        var headers = {
+                          "Content-Type": "application/json",
+                          Authorization: "Bearer " + token,
+                          "OAI-Language": "en-US",
+                        };
+                        if (deviceId) headers["OAI-Device-Id"] = deviceId;
+                        
+                        var conversationId = _conversationId || parsed.conversation_id;
+                        var downloadUrl = "https://chatgpt.com/backend-api/files/download/" + fileId + "?include_library_file_state=true&conversation_id=" + conversationId + "&inline=false&download_intent=false";
+                        
+                        console.log("[FluxNotes ChatGPT] Requesting download URL for file:", fileId);
+                        console.log("[FluxNotes ChatGPT] Download API URL:", downloadUrl);
+                        var downloadRes = await fetch(downloadUrl, {
+                          method: "GET",
+                          credentials: "include",
+                          headers: headers,
+                        });
+                        
+                        if (!downloadRes.ok) {
+                          var errText = await downloadRes.text();
+                          console.error("[FluxNotes ChatGPT] Failed to get download URL:", downloadRes.status, errText);
+                          return;
+                        }
+                        
+                        var downloadData = await downloadRes.json();
+                        console.log("[FluxNotes ChatGPT] Download API response:", JSON.stringify(downloadData, null, 2));
+                        var imageUrl = downloadData.download_url;
+                        
+                        if (!imageUrl) {
+                          console.error("[FluxNotes ChatGPT] No download URL in response:", downloadData);
+                          return;
+                        }
+                        
+                        console.log("[FluxNotes ChatGPT] Got download URL, downloading image:", imageUrl);
+                        var imageRes = await fetch(imageUrl, {
+                          method: "GET",
+                          credentials: "include",
+                          headers: headers,
+                        });
+                        
+                        if (!imageRes.ok) {
+                          var imgErrText = await imageRes.text();
+                          console.error("[FluxNotes ChatGPT] Failed to download image:", imageRes.status, imgErrText);
+                          return;
+                        }
+                        
+                        var imageBlob = await imageRes.blob();
+                        var imageArrayBuffer = await imageBlob.arrayBuffer();
+                        var imageBytes = new Uint8Array(imageArrayBuffer);
+                        var imageBinary = "";
+                        for (var j = 0; j < imageBytes.length; j++) imageBinary += String.fromCharCode(imageBytes[j]);
+                        var imageBase64 = btoa(imageBinary);
+                        var imageMimeType = imageBlob.type || "image/png";
+                        
+                        console.log("[FluxNotes ChatGPT] Successfully downloaded image. Size:", imageBytes.length, "type:", imageMimeType);
+                        
+                        // Add to generated images similar to sandbox images
+                        if (!window.__fluxnotesGeneratedAssetImages) {
+                          window.__fluxnotesGeneratedAssetImages = [];
+                        }
+                        window.__fluxnotesGeneratedAssetImages.push({
+                          fileId: fileId,
+                          mimeType: imageMimeType,
+                          size: imageBytes.length,
+                          downloadUrl: imageUrl,
+                        });
+                      } catch (downloadError) {
+                        console.error("[FluxNotes ChatGPT] Error downloading image:", downloadError);
+                      }
+                    })();
+                  }
+                }
+              } catch (e) {
+                console.warn("[FluxNotes ChatGPT] Failed to extract asset_pointer:", e);
+              }
             }
 
             var parts =
@@ -722,7 +828,6 @@
       body: JSON.stringify(payload),
       signal: controller.signal,
     });
-
     // Refresh expired session token and retry the conversation request once.
     if (res.status === 401) {
       clearTimeout(timeoutId);

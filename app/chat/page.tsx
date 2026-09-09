@@ -68,8 +68,11 @@ export default function NewChatPage() {
   }, []);
 
   useEffect(() => {
-    containerEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [pageImages, isProcessing, loadingPagesCount]);
+    // Only scroll to bottom during processing or loading, not when images are added
+    if (isProcessing || loadingPagesCount > 0) {
+      containerEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [isProcessing, loadingPagesCount]);
 
   useEffect(() => {
     if (window.electronAPI?.onNewImage) {
@@ -91,6 +94,15 @@ export default function NewChatPage() {
           const updatedImages = [...prev.filter((item) => item.pageNumber !== nextPgNum), { pageNumber: nextPgNum, filePath }]
             .sort((first, second) => first.pageNumber - second.pageNumber);
           pageImagesRef.current = updatedImages;
+          
+          // Scroll to the newly added image
+          setTimeout(() => {
+            const targetImg = imageRefs.current[nextPgNum - 1];
+            if (targetImg) {
+              targetImg.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+          }, 100);
+          
           return updatedImages;
         });
       });
