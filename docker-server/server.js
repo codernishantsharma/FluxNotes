@@ -246,6 +246,35 @@ function startLoginCheckRoutine() {
     const previouslyLoggedIn = isLoggedIn;
     isLoggedIn = status.loggedIn;
 
+    if (status.onChatGpt) {
+      if (status.loggedIn) {
+        // PERFORMANCE OPTIMIZATION: Strip all CSS from chatgpt.com when user is logged in.
+        // Stripping CSS styles in Puppeteer reduces background layout/render calculation
+        // and CPU usage while maintaining full API communication functionality.
+        if (page && !page.isClosed()) {
+          await page.evaluate(() => {
+            try {
+              const styles = document.querySelectorAll('style, link[rel="stylesheet"]');
+              styles.forEach(s => s.remove());
+              for (let i = 0; i < document.styleSheets.length; i++) {
+                try { document.styleSheets[i].disabled = true; } catch (_) {}
+              }
+            } catch (_) {}
+          }).catch(() => {});
+        }
+      } else {
+        // If not logged in on chatgpt.com but styles were previously stripped, reload page so login interface renders properly
+        if (page && !page.isClosed()) {
+          const missingStyles = await page.evaluate(() => {
+            return document.querySelectorAll('style, link[rel="stylesheet"]').length === 0;
+          }).catch(() => false);
+          if (missingStyles) {
+            await page.goto(CHATGPT_URL, { waitUntil: 'domcontentloaded' }).catch(() => {});
+          }
+        }
+      }
+    }
+
     if (status.onChatGpt && !previouslyLoggedIn) {
       await injectEngineIfNeeded().catch(() => {});
     }
