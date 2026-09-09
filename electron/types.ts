@@ -14,7 +14,7 @@ export interface NoteRecord {
   subTopics?: SubTopic[];
   aiResponse?: string;
   recommendedResponse?: string[];
-  images?: string[];
+  images?: Array<{ filePath: string; pageNumber: number }>;
   chatUrl?: string;
   chatSessionId?: string | null;
   chatSession?: ChatSession | null;

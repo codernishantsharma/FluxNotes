@@ -126,11 +126,11 @@ export async function writeRawResponse(responseData: RawResponseData): Promise<v
       // Preserve raw response when not JSON
     }
 
-    await fs.promises.writeFile(
-      RAW_JSON_PATH,
-      JSON.stringify({ ...responseData, formattedJson }, null, 2),
-      'utf8',
-    );
+    //await fs.promises.writeFile(
+    //  RAW_JSON_PATH,
+    //  JSON.stringify({ ...responseData, formattedJson }, null, 2),
+    //  'utf8',
+    // );
     console.log(`[raw.json] Saved latest raw response -> ${RAW_JSON_PATH}`);
   } catch (error) {
     const err = error as Error;
@@ -169,7 +169,7 @@ export function appendToResultJson(entry: Record<string, unknown>): void {
         timestamp: new Date().toISOString(),
         ...entry,
       });
-      fs.writeFileSync(RESULT_JSON_PATH, JSON.stringify(arr, null, 2), 'utf8');
+      // fs.writeFileSync(RESULT_JSON_PATH, JSON.stringify(arr, null, 2), 'utf8');
       console.log(`[result.json] Appended entry #${arr.length} -> ${RESULT_JSON_PATH}`);
     } catch (writeErr) {
       const err = writeErr as Error;

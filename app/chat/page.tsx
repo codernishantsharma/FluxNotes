@@ -162,13 +162,27 @@ export default function NewChatPage() {
 
         const savedImages = Array.isArray(note.images)
           ? note.images
-            .filter((filePath: unknown): filePath is string => typeof filePath === 'string')
-            .map((filePath: string, index: number) => ({
-              pageNumber: index + 1,
-              filePath: filePath.startsWith('local://')
-                ? filePath
-                : `local://${encodeURI(filePath.replace(/\\/g, '/'))}`,
-            }))
+            .map((image: unknown, index: number) => {
+              // Handle both old format (string) and new format (object with filePath and pageNumber)
+              if (typeof image === 'string') {
+                return {
+                  pageNumber: index + 1, // Assign page number based on array index for old format
+                  filePath: image.startsWith('local://')
+                    ? image
+                    : `local://${encodeURI(image.replace(/\\/g, '/'))}`,
+                };
+              } else if (image && typeof image === 'object' && 'filePath' in image) {
+                const pageNumber = typeof image.pageNumber === 'number' ? image.pageNumber : index + 1;
+                return {
+                  pageNumber,
+                  filePath: typeof image.filePath === 'string' && image.filePath.startsWith('local://')
+                    ? image.filePath
+                    : `local://${encodeURI(String(image.filePath).replace(/\\/g, '/'))}`,
+                };
+              }
+              return null;
+            })
+            .filter((image): image is { pageNumber: number; filePath: string } => image !== null)
           : [];
 
         pageImagesRef.current = savedImages;
@@ -280,7 +294,10 @@ export default function NewChatPage() {
         setCurrentlyGeneratingPage(null);
 
         if (window.electronAPI?.saveNote && latestAssistantData) {
-          const finalImagePaths = pageImagesRef.current.map((image) => image.filePath);
+          const finalImagePaths = pageImagesRef.current.map((image) => ({
+            filePath: image.filePath,
+            pageNumber: image.pageNumber,
+          }));
           await window.electronAPI.saveNote({
             topicId: latestAssistantData.topicId || String(Date.now()),
             topicName: latestAssistantData.topicName || "Untitled Notes",

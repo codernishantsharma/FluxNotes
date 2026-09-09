@@ -81,14 +81,29 @@ export function registerNotesIpcHandlers(
   });
 
   ipcMain.handle('save-note', async (_, noteData: NoteRecord) => {
-    const workerWindow = getWorkerWindow();
     const notes = await getStoredNotes();
-    const chatUrl = noteData.chatUrl || (workerWindow ? workerWindow.webContents.getURL() : '');
+    const worker = getWorkerWindow();
+    const chatUrl = noteData.chatUrl || (worker ? worker.webContents.getURL() : '');
+
+    // Handle images with page numbers
     const savedImages = Array.isArray(noteData.images)
       ? noteData.images
-        .map((imagePath) => typeof imagePath === 'string' ? fromLocalImageUrl(imagePath) : '')
-        .filter((imagePath) => imagePath.startsWith(imagesDir) && fs.existsSync(imagePath))
-        .map(toLocalImageUrl)
+        .map((image) => {
+          // Handle both old format (string) and new format (object with filePath and pageNumber)
+          const imagePath = typeof image === 'string' ? image : image.filePath;
+          const pageNumber = typeof image === 'string' ? 0 : image.pageNumber;
+          const localPath = typeof imagePath === 'string' ? fromLocalImageUrl(imagePath) : '';
+
+          if (!localPath.startsWith(imagesDir) || !fs.existsSync(localPath)) {
+            return null;
+          }
+
+          return {
+            filePath: toLocalImageUrl(localPath),
+            pageNumber: pageNumber || 0,
+          };
+        })
+        .filter((image): image is { filePath: string; pageNumber: number } => image !== null)
       : [];
 
     const fullNoteRecord: NoteRecord = {
@@ -141,10 +156,12 @@ export function registerNotesIpcHandlers(
 
     const remainingNotes = notes.filter((note) => note.topicId !== topicId);
     const remainingImagePaths = new Set(remainingNotes.flatMap((note) => (
-      Array.isArray(note.images) ? note.images.map(fromLocalImageUrl) : []
+      Array.isArray(note.images)
+        ? note.images.map((image) => typeof image === 'string' ? fromLocalImageUrl(image) : fromLocalImageUrl(image.filePath))
+        : []
     )));
     const removableImagePaths = (noteToDelete.images || [])
-      .map(fromLocalImageUrl)
+      .map((image) => typeof image === 'string' ? fromLocalImageUrl(image) : fromLocalImageUrl(image.filePath))
       .filter((imagePath) => imagePath.startsWith(imagesDir) && !remainingImagePaths.has(imagePath));
 
     await Promise.all(removableImagePaths.map(async (imagePath) => {
