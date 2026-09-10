@@ -20,6 +20,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.removeAllListeners('new-image');
     ipcRenderer.on('new-image', (_event, value) => callback(value));
   },
+  onImageGenerationFailed: (callback: (data: { pageNumber: number; errorMessage: string; subTopicNames: string[] }) => void) => {
+    ipcRenderer.removeAllListeners('image-generation-failed');
+    ipcRenderer.on('image-generation-failed', (_event, value) => callback(value));
+  },
   onProgressUpdate: (callback: (progress: string) => void) => {
     ipcRenderer.removeAllListeners('image-progress-update');
     ipcRenderer.on('image-progress-update', (_event, val) => callback(val));

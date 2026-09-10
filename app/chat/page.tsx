@@ -7,6 +7,7 @@ import { ChatTitleBar } from '@/components/chat/ChatTitleBar';
 import { PageSkeleton } from '@/components/chat/PageSkeleton';
 import { ChatOutlineSidebar } from '@/components/chat/ChatOutlineSidebar';
 import { ChatInputArea } from '@/components/chat/ChatInputArea';
+import { NotesThemePreview } from '@/components/chat/NotesThemePreview';
 
 const isStartOrContinue = (text: string) => {
   const lower = text.trim().toLowerCase();
@@ -96,7 +97,7 @@ export default function NewChatPage() {
           const updatedImages = [...prev.filter((item) => item.pageNumber !== nextPgNum), { pageNumber: nextPgNum, filePath }]
             .sort((first, second) => first.pageNumber - second.pageNumber);
           pageImagesRef.current = updatedImages;
-          
+
           // Scroll to the newly added image
           setTimeout(() => {
             const targetImg = imageRefs.current[nextPgNum - 1];
@@ -104,11 +105,25 @@ export default function NewChatPage() {
               targetImg.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }
           }, 100);
-          
+
           return updatedImages;
         });
       });
     }
+
+    // Listen for image generation failures from backend
+    if (window.electronAPI?.onImageGenerationFailed) {
+      window.electronAPI.onImageGenerationFailed((data: { pageNumber: number; errorMessage: string; subTopicNames: string[] }) => {
+        console.log('[FRONTEND] Image generation failed for page:', data.pageNumber, data.errorMessage);
+        setFailedPages((prev) => ({ ...prev, [data.pageNumber]: data.errorMessage }));
+        setCurrentlyGeneratingPage(null);
+        setLoadingPagesCount((count) => Math.max(0, count - 1));
+      });
+    }
+
+    return () => {
+      // Cleanup listeners if needed
+    };
   }, []);
 
   useEffect(() => {
@@ -543,7 +558,12 @@ export default function NewChatPage() {
         {/* Left/Center Area: Gallery View */}
         <div className="custom-scrollbar relative flex flex-1 flex-col overflow-y-auto pb-52 sm:pb-64">
           <div className="mx-auto flex h-max w-full max-w-4xl flex-col gap-4 p-4">
-            {hasStartedGeneration && assistantData?.subTopics && assistantData.subTopics.length > 0 ? (
+            {!hasStartedGeneration && assistantData?.status === 'new' && assistantData?.notesTheme ? (
+              <NotesThemePreview 
+                notesTheme={assistantData.notesTheme}
+                topicName={assistantData.topicName}
+              />
+            ) : hasStartedGeneration && assistantData?.subTopics && assistantData.subTopics.length > 0 ? (
               <>
                 <style>{`
                   @keyframes cozyGradientShift {

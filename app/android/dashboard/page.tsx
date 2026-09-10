@@ -9,13 +9,14 @@ import { sendMobileCommand } from '../mobile-api';
 type NoteItem = {
   topicId: string;
   topicName: string;
-  images?: string[];
+  images?: Array<{ filePath: string; pageNumber: number }>;
   subTopics?: { names: string[]; pageNumber: string | number }[];
   timestamp?: number;
   pinned?: boolean;
 };
 
-function toImageSource(imagePath: string, hostUrl: string): string {
+function toImageSource(image: string | { filePath: string; pageNumber: number }, hostUrl: string): string {
+  const imagePath = typeof image === 'string' ? image : image.filePath;
   if (imagePath.startsWith('local://') || imagePath.startsWith('data:')) return imagePath;
   if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) return imagePath;
   return toHttpApiUrl(hostUrl, imagePath);

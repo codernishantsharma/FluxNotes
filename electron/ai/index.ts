@@ -57,72 +57,66 @@ export async function processAiPrompt(
   }
 
   let result: ChatGptResult | null = null;
+  let generationSuccess = false;
+  let generationAttempts = 0;
+  const maxGenerationAttempts = 3;
 
-  if (provider === 'gemini') {
+  while (!generationSuccess && generationAttempts < maxGenerationAttempts) {
+    generationAttempts++;
     try {
-      await injectGeminiEngineIfNeeded(workerWindow);
-      const geminiPromptContent = promptContent.replace(
-        /### Your Image Response[\s\S]*?(?=### Info On Image Generation)/,
-        '',
-      );
-      const isGeminiImageCommand = (() => {
-        try {
-          const parsed = JSON.parse(userText) as { status?: unknown };
-          return parsed.status === 'start' || parsed.status === 'continue';
-        } catch {
-          return /["']?status["']?\s*:\s*["'](?:start|continue)["']/i.test(userText);
-        }
-      })();
-
-      const geminiResult = await workerWindow.webContents.executeJavaScript(`
-        (async function() {
-          if (!window.__fluxnotesGeminiUnified) {
-            throw new Error("Gemini engine not loaded.");
+      if (provider === 'gemini') {
+        await injectGeminiEngineIfNeeded(workerWindow);
+        const geminiPromptContent = promptContent.replace(
+          /### Your Image Response[\s\S]*?(?=### Info On Image Generation)/,
+          '',
+        );
+        const isGeminiImageCommand = (() => {
+          try {
+            const parsed = JSON.parse(userText) as { status?: unknown };
+            return parsed.status === 'start' || parsed.status === 'continue';
+          } catch {
+            return /["']?status["']?\s*:\s*["'](?:start|continue)["']/i.test(userText);
           }
-
-          const sysPrompt = ${JSON.stringify(geminiPromptContent)};
-          const usrText = ${JSON.stringify(userText)};
-          const sessionId = ${JSON.stringify(sessionId)};
-          ${geminiInitialized ? '' : `if (sysPrompt.trim()) await window.__fluxnotesGeminiUnified.send(sysPrompt, '3.1-pro', null, sessionId);`}
-          const response = await window.__fluxnotesGeminiUnified.send(usrText, '3.1-pro', null, sessionId);
-          return { rawText: String(response || ''), session: null };
         })();
-      `);
-      geminiInitialized = true;
-      const downloadedGeminiImages = isGeminiImageCommand
-        ? await downloadGeminiImages(geminiResult?.rawText || '')
-        : [];
 
-      result = {
-        rawText: geminiResult?.rawText || '',
-        conversationId: null,
-        messageId: null,
-        session: null,
-        generationId: null,
-        fileId: null,
-        generatedImages: downloadedGeminiImages.map(({ download, ...image }) => image),
-        downloadedSandboxImages: downloadedGeminiImages,
-      };
-    } catch (geminiError) {
-      const err = geminiError as Error;
-      console.error('[ELECTRON] Gemini processing error:', err.message);
-      logError({
-        category: 'api',
-        message: 'Gemini AI processing failed',
-        details: { error: err.message, stack: err.stack, userText: userText.substring(0, 200) },
-      });
-      throw err;
-    }
-  } else {
-    try {
-      await injectChatGptEngineIfNeeded(workerWindow);
+        const geminiResult = await workerWindow.webContents.executeJavaScript(`
+          (async function() {
+            if (!window.__fluxnotesGeminiUnified) {
+              throw new Error("Gemini engine not loaded.");
+            }
 
-      // Register storage for asset_pointer generated images
-      await workerWindow.webContents.executeJavaScript(`
-        window.__fluxnotesGeneratedAssetImages = [];
-      `);
+            const sysPrompt = ${JSON.stringify(geminiPromptContent)};
+            const usrText = ${JSON.stringify(userText)};
+            const sessionId = ${JSON.stringify(sessionId)};
+            ${geminiInitialized ? '' : `if (sysPrompt.trim()) await window.__fluxnotesGeminiUnified.send(sysPrompt, '3.1-pro', null, sessionId);`}
+            const response = await window.__fluxnotesGeminiUnified.send(usrText, '3.1-pro', null, sessionId);
+            return { rawText: String(response || ''), session: null };
+          })();
+        `);
+        geminiInitialized = true;
+        const downloadedGeminiImages = isGeminiImageCommand
+          ? await downloadGeminiImages(geminiResult?.rawText || '')
+          : [];
 
-      result = await workerWindow.webContents.executeJavaScript(`
+        result = {
+          rawText: geminiResult?.rawText || '',
+          conversationId: null,
+          messageId: null,
+          session: null,
+          generationId: null,
+          fileId: null,
+          generatedImages: downloadedGeminiImages.map(({ download, ...image }) => image),
+          downloadedSandboxImages: downloadedGeminiImages,
+        };
+      } else {
+        await injectChatGptEngineIfNeeded(workerWindow);
+
+        // Register storage for asset_pointer generated images
+        await workerWindow.webContents.executeJavaScript(`
+          window.__fluxnotesGeneratedAssetImages = [];
+        `);
+
+        result = await workerWindow.webContents.executeJavaScript(`
       (async function() {
         if (!window.__fluxnotesChatGPT) {
           throw new Error("fluxnotes engine not loaded.");
@@ -267,7 +261,7 @@ export async function processAiPrompt(
 
         // Wait a bit for asset_pointer images to download
         await new Promise(resolve => setTimeout(resolve, 3000));
-        
+
         const generatedAssetImages = window.__fluxnotesGeneratedAssetImages || [];
 
         return {
@@ -283,15 +277,24 @@ export async function processAiPrompt(
         };
       })();
     `);
-    } catch (chatgptError) {
-      const err = chatgptError as Error;
-      console.error('[ELECTRON] ChatGPT processing error:', err.message);
+      }
+      generationSuccess = true;
+    } catch (generationError) {
+      const err = generationError as Error;
+      console.error(`[ELECTRON] AI generation failed (attempt ${generationAttempts}/${maxGenerationAttempts}):`, err.message);
       logError({
         category: 'api',
-        message: 'ChatGPT AI processing failed',
-        details: { error: err.message, stack: err.stack, userText: userText.substring(0, 200) },
+        message: `AI generation failed (attempt ${generationAttempts}/${maxGenerationAttempts})`,
+        details: { error: err.message, stack: err.stack, userText: userText.substring(0, 200), provider },
       });
-      throw err;
+
+      if (generationAttempts >= maxGenerationAttempts) {
+        // All retries exhausted, throw the error
+        throw err;
+      } else {
+        // Wait before retry
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
     }
   }
 
@@ -339,38 +342,74 @@ export async function processAiPrompt(
           // If we can't parse the page number, leave it null
         }
         
-        try {
-          console.log('[ELECTRON] Saving downloaded sandbox image to disk:', {
-            imagePath: img.imagePath || null,
-            fileId: img.fileId || fileId || null,
-            generationId: img.generationId || generationId || null,
-            pageNumber: pageNumber,
-            destination: filePath,
-          });
-          fs.writeFileSync(filePath, base64Data, 'base64');
-          console.log('[ELECTRON] Sandbox image saved locally:', filePath);
-          await saveRecordToDb({ 
-            id: usedFileId, 
-            filePath, 
-            timestamp: Date.now(), 
-            source: 'sandbox', 
-            generationId: img.generationId || generationId || undefined, 
-            fileId: img.fileId || fileId || undefined,
-            pageNumber: pageNumber || undefined,
-            sessionId: sessionId,
-          });
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('new-image', { filePath: toLocalImageUrl(filePath), pageNumber });
-            console.log('[ELECTRON] Sent new-image event with local path:', toLocalImageUrl(filePath));
+        let saveSuccess = false;
+        let saveAttempts = 0;
+        const maxSaveAttempts = 3;
+
+        while (!saveSuccess && saveAttempts < maxSaveAttempts) {
+          saveAttempts++;
+          try {
+            console.log('[ELECTRON] Saving downloaded sandbox image to disk:', {
+              imagePath: img.imagePath || null,
+              fileId: img.fileId || fileId || null,
+              generationId: img.generationId || generationId || null,
+              pageNumber: pageNumber,
+              destination: filePath,
+              attempt: saveAttempts,
+            });
+            fs.writeFileSync(filePath, base64Data, 'base64');
+            console.log('[ELECTRON] Sandbox image saved locally:', filePath);
+            await saveRecordToDb({
+              id: usedFileId,
+              filePath,
+              timestamp: Date.now(),
+              source: 'sandbox',
+              generationId: img.generationId || generationId || undefined,
+              fileId: img.fileId || fileId || undefined,
+              pageNumber: pageNumber || undefined,
+              sessionId: sessionId,
+            });
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('new-image', { filePath: toLocalImageUrl(filePath), pageNumber });
+              console.log('[ELECTRON] Sent new-image event with local path:', toLocalImageUrl(filePath));
+            }
+            saveSuccess = true;
+          } catch (saveErr) {
+            const err = saveErr as Error;
+            console.error(`[ELECTRON] Failed to save sandbox image locally (attempt ${saveAttempts}/${maxSaveAttempts}):`, err.message);
+            if (saveAttempts >= maxSaveAttempts) {
+              logError({
+                category: 'storage',
+                message: 'Failed to save sandbox image locally after retries',
+                details: { error: err.message, stack: err.stack, filePath, fileId: img.fileId || fileId, attempts: saveAttempts },
+              });
+              // Save failed page information for retry
+              if (pageNumber && mainWindow && !mainWindow.isDestroyed()) {
+                try {
+                  const subTopicNames = [];
+                  try {
+                    const jsonText = extractJsonFromResponse(rawText);
+                    const jsonData = JSON.parse(completeTruncatedJson(jsonText)) as { subTopicNames?: string[] };
+                    if (Array.isArray(jsonData.subTopicNames)) {
+                      subTopicNames.push(...jsonData.subTopicNames);
+                    }
+                  } catch {
+                    // Ignore parsing errors
+                  }
+                  mainWindow.webContents.send('image-generation-failed', {
+                    pageNumber,
+                    errorMessage: err.message,
+                    subTopicNames,
+                  });
+                } catch (notifyErr) {
+                  console.error('[ELECTRON] Failed to notify about failed image generation:', notifyErr);
+                }
+              }
+            } else {
+              // Wait before retry
+              await new Promise(resolve => setTimeout(resolve, 1000));
+            }
           }
-        } catch (saveErr) {
-          const err = saveErr as Error;
-          console.error('[ELECTRON] Failed to save sandbox image locally:', err.message);
-          logError({
-            category: 'storage',
-            message: 'Failed to save sandbox image locally',
-            details: { error: err.message, stack: err.stack, filePath, fileId: img.fileId || fileId },
-          });
         }
       }
     }
@@ -439,38 +478,84 @@ export async function processAiPrompt(
           const noteIdValue = String(sessionId || messageId || 'note');
           const fileName = `image_${safeFileName(noteIdValue)}_${safeFileName(usedFileId)}.${safeExt}`;
           const filePath = path.join(imagesDir, fileName);
-          
-          console.log('[ELECTRON] Saving downloaded asset image to disk:', {
-            fileId: img.fileId || fileId || null,
-            generationId: generationId || null,
-            pageNumber: pageNumber,
-            destination: filePath,
-          });
-          
-          fs.writeFileSync(filePath, imageBuffer);
-          console.log('[ELECTRON] Asset image saved locally:', filePath);
-          
-          await saveRecordToDb({ 
-            id: usedFileId, 
-            filePath, 
-            timestamp: Date.now(), 
-            source: 'asset_pointer', 
-            generationId: generationId || undefined, 
-            fileId: img.fileId || fileId || undefined,
-            pageNumber: pageNumber || undefined,
-            sessionId: sessionId,
-          });
-          
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('new-image', { filePath: toLocalImageUrl(filePath), pageNumber });
-            console.log('[ELECTRON] Sent new-image event with local path:', toLocalImageUrl(filePath));
+
+          let saveSuccess = false;
+          let saveAttempts = 0;
+          const maxSaveAttempts = 3;
+
+          while (!saveSuccess && saveAttempts < maxSaveAttempts) {
+            saveAttempts++;
+            try {
+              console.log('[ELECTRON] Saving downloaded asset image to disk:', {
+                fileId: img.fileId || fileId || null,
+                generationId: generationId || null,
+                pageNumber: pageNumber,
+                destination: filePath,
+                attempt: saveAttempts,
+              });
+
+              fs.writeFileSync(filePath, imageBuffer);
+              console.log('[ELECTRON] Asset image saved locally:', filePath);
+
+              await saveRecordToDb({
+                id: usedFileId,
+                filePath,
+                timestamp: Date.now(),
+                source: 'asset_pointer',
+                generationId: generationId || undefined,
+                fileId: img.fileId || fileId || undefined,
+                pageNumber: pageNumber || undefined,
+                sessionId: sessionId,
+              });
+
+              if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('new-image', { filePath: toLocalImageUrl(filePath), pageNumber });
+                console.log('[ELECTRON] Sent new-image event with local path:', toLocalImageUrl(filePath));
+              }
+              saveSuccess = true;
+            } catch (saveErr) {
+              const err = saveErr as Error;
+              console.error(`[ELECTRON] Failed to save asset image locally (attempt ${saveAttempts}/${maxSaveAttempts}):`, err.message);
+              if (saveAttempts >= maxSaveAttempts) {
+                logError({
+                  category: 'storage',
+                  message: 'Failed to save asset image locally after retries',
+                  details: { error: err.message, stack: err.stack, filePath, fileId: img.fileId || fileId, attempts: saveAttempts },
+                });
+                // Save failed page information for retry
+                if (pageNumber && mainWindow && !mainWindow.isDestroyed()) {
+                  try {
+                    const subTopicNames = [];
+                    try {
+                      const jsonText = extractJsonFromResponse(rawText);
+                      const jsonData = JSON.parse(completeTruncatedJson(jsonText)) as { subTopicNames?: string[] };
+                      if (Array.isArray(jsonData.subTopicNames)) {
+                        subTopicNames.push(...jsonData.subTopicNames);
+                      }
+                    } catch {
+                      // Ignore parsing errors
+                    }
+                    mainWindow.webContents.send('image-generation-failed', {
+                      pageNumber,
+                      errorMessage: err.message,
+                      subTopicNames,
+                    });
+                  } catch (notifyErr) {
+                    console.error('[ELECTRON] Failed to notify about failed image generation:', notifyErr);
+                  }
+                }
+              } else {
+                // Wait before retry
+                await new Promise(resolve => setTimeout(resolve, 1000));
+              }
+            }
           }
         } catch (downloadErr) {
           const err = downloadErr as Error;
-          console.error('[ELECTRON] Failed to download and save asset image:', err.message);
+          console.error('[ELECTRON] Failed to download asset image:', err.message);
           logError({
             category: 'api',
-            message: 'Failed to download and save asset image',
+            message: 'Failed to download asset image',
             details: { error: err.message, stack: err.stack, downloadUrl: img.downloadUrl, fileId: img.fileId || fileId },
           });
         }
