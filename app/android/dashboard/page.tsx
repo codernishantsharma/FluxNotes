@@ -9,17 +9,16 @@ import { sendMobileCommand } from '../mobile-api';
 type NoteItem = {
   topicId: string;
   topicName: string;
-  images?: Array<{ filePath: string; pageNumber: number }>;
+  images?: string[];
   subTopics?: { names: string[]; pageNumber: string | number }[];
   timestamp?: number;
   pinned?: boolean;
 };
 
-function toImageSource(image: string | { filePath: string; pageNumber: number }, hostUrl: string): string {
-  const imagePath = typeof image === 'string' ? image : image.filePath;
-  if (imagePath.startsWith('local://') || imagePath.startsWith('data:')) return imagePath;
-  if (imagePath.startsWith('http://') || imagePath.startsWith('https://')) return imagePath;
-  return toHttpApiUrl(hostUrl, imagePath);
+function toImageSource(image: string, hostUrl: string): string {
+  if (image.startsWith('local://') || image.startsWith('data:')) return image;
+  if (image.startsWith('http://') || image.startsWith('https://')) return image;
+  return toHttpApiUrl(hostUrl, image);
 }
 
 export default function AndroidDashboardPage() {
@@ -189,9 +188,14 @@ export default function AndroidDashboardPage() {
             <article key={note.topicId || note.timestamp} className="group flex gap-3 rounded-3xl border border-white/10 bg-[#111a1c] p-3 shadow-xl shadow-black/10">
               <button type="button" onClick={() => openNote(note.topicId)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
                 <div className="h-[72px] w-[72px] shrink-0 overflow-hidden rounded-2xl bg-[#20393b]">
-                  {note.images?.[0]
-                    ? <img onClick={(event) => { event.stopPropagation(); setZoomedImage(toImageSource(note.images![0], imageHostUrl)); }} src={toImageSource(note.images[0], imageHostUrl)} alt="" className="h-full w-full object-cover" />
-                    : <div className="flex h-full items-center justify-center text-teal-200/70"><BookIcon /></div>}
+                  {(() => {
+                    const firstImage = note.images?.[0];
+                    return firstImage ? (
+                      <img onClick={(event) => { event.stopPropagation(); setZoomedImage(toImageSource(firstImage, imageHostUrl)); }} src={toImageSource(firstImage, imageHostUrl)} alt="" className="h-full w-full object-cover" />
+                    ) : (
+                      <div className="flex h-full items-center justify-center text-teal-200/70"><BookIcon /></div>
+                    );
+                  })()}
                 </div>
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-[0.12em] text-teal-300/80">

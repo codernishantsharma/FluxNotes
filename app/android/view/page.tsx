@@ -9,16 +9,15 @@ import { downloadNoteImages, getCachedNotes, getMobileValue, mobileKeys, setCach
 type NoteItem = {
   topicId: string;
   topicName: string;
-  images?: Array<{ filePath: string; pageNumber: number }>;
+  images?: string[];
   subTopics?: { names: string[]; pageNumber: string | number }[];
   timestamp?: number;
   pinned?: boolean;
 };
 
-function imageSource(image: string | { filePath: string; pageNumber: number }, hostUrl: string): string {
-  const imagePath = typeof image === 'string' ? image : image.filePath;
-  if (imagePath.startsWith('http://') || imagePath.startsWith('https://') || imagePath.startsWith('data:')) return imagePath;
-  return toHttpApiUrl(hostUrl, imagePath);
+function imageSource(image: string, hostUrl: string): string {
+  if (image.startsWith('http://') || image.startsWith('https://') || image.startsWith('data:')) return image;
+  return toHttpApiUrl(hostUrl, image);
 }
 
 export default function AndroidNoteViewPage() {
