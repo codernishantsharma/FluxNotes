@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 
 type NotesThemePreviewProps = {
-  notesTheme: Record<string, unknown>;
+  notesTheme: Record<string, unknown> | null | undefined;
   topicName?: string;
 };
 

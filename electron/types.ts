@@ -25,6 +25,7 @@ export interface NoteRecord {
   generationId?: string;
   fileId?: string;
   generatedImages?: GeneratedImageInfo[];
+  notesTheme?: Record<string, unknown>;
 }
 
 export interface ImageRecord {
@@ -45,6 +46,7 @@ export interface FailedPage {
   sessionId: string;
   errorMessage?: string;
   timestamp: number;
+  notesTheme?: Record<string, unknown>;
 }
 
 export interface NotesData {

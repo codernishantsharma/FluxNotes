@@ -215,6 +215,7 @@ export default function NewChatPage() {
           chatUrl: note.chatUrl,
           chatSessionId: note.chatSessionId,
           chatSession: note.chatSession,
+          notesTheme: note.notesTheme,
         });
         setHasStartedGeneration(true);
       } catch (error) {
@@ -232,7 +233,7 @@ export default function NewChatPage() {
     setInputText('');
     setIsProcessing(true);
 
-    setAssistantData((prev) => prev ? { ...prev, aiResponse: undefined, recommendedResponse: undefined } : null);
+    setAssistantData((prev) => prev ? { ...prev, aiResponse: undefined, recommendedResponse: undefined, notesTheme: prev.notesTheme } : null);
 
     try {
       const latestAssistantData = assistantData;
@@ -251,6 +252,7 @@ export default function NewChatPage() {
           ...prev,
           aiResponse: undefined,
           recommendedResponse: undefined,
+          notesTheme: prev.notesTheme,
         } : null);
         setLoadingPagesCount(totalPages);
 
@@ -272,7 +274,8 @@ export default function NewChatPage() {
           const structuredPayload = JSON.stringify({
             status: currentStatus,
             subTopicNames: currentSubTopic.names || [],
-            pageNumber: pageNumString
+            pageNumber: pageNumString,
+            notesTheme: latestAssistantData?.notesTheme
           }, null, 2);
 
           try {
@@ -303,6 +306,7 @@ export default function NewChatPage() {
                   sessionId: chatSessionRef.current.sessionId || '',
                   errorMessage: errMsg,
                   timestamp: Date.now(),
+                  notesTheme: latestAssistantData.notesTheme as Record<string, unknown> | undefined
                 });
               } catch (saveErr) {
                 console.error('Failed to save failed page info:', saveErr);
@@ -326,6 +330,7 @@ export default function NewChatPage() {
             chatUrl: chatSessionRef.current.chatUrl,
             chatSessionId: chatSessionRef.current.sessionId,
             chatSession: chatSessionRef.current.session,
+            notesTheme: latestAssistantData.notesTheme,
           });
         }
 
@@ -343,6 +348,7 @@ export default function NewChatPage() {
               ...prevData,
               ...responseData,
               subTopics: responseData.subTopics || prevData.subTopics,
+              notesTheme: responseData.notesTheme || prevData.notesTheme,
             } : responseData;
             return updated;
           });
@@ -426,6 +432,7 @@ export default function NewChatPage() {
         subTopicNames: failedPage.subTopicNames,
         pageNumber: String(failedPage.pageNumber),
         originalTopic: failedPage.originalTopic,
+        notesTheme: assistantData?.notesTheme
       }, null, 2);
 
       const responseData = await window.electronAPI?.fillChatGptInput(retryPayload);
@@ -472,6 +479,7 @@ export default function NewChatPage() {
         subTopicNames: subTopic.names || [],
         pageNumber: String(pageNumber),
         originalTopic: assistantData.topicName || '',
+        notesTheme: assistantData?.notesTheme
       }, null, 2);
 
       const responseData = await window.electronAPI?.fillChatGptInput(retryPayload);
