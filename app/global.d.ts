@@ -20,8 +20,9 @@ declare global {
       getStoredImages: () => Promise<string[]>;
       getAllNotes: () => Promise<any[]>;
       getNoteById: (topicId: string) => Promise<any>;
-      onNewImage: (callback: (image: string | { filePath: string; pageNumber?: number | null }) => void) => void;
-      onProgressUpdate: (callback: (progress: any) => void) => void;
+      onNewImage: (callback: (data: string | { filePath: string; pageNumber: number | null }) => void) => void;
+      onImageGenerationFailed: (callback: (data: { pageNumber: number; errorMessage: string; subTopicNames: string[] }) => void) => void;
+      onProgressUpdate: (callback: (progress: string) => void) => void;
       saveNote: (note: any) => Promise<void>;
       renameNote: (topicId: string, topicName: string) => Promise<{ success: boolean; error?: string }>;
       setNotePinned: (topicId: string, pinned: boolean) => Promise<{ success: boolean; error?: string }>;

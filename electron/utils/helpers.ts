@@ -102,9 +102,10 @@ export function extractJsonFromResponse(rawText: string): string {
     && rawText.includes('\\"')
     ? rawText.replace(/\\n/g, '\n').replace(/\\r/g, '\r').replace(/\\t/g, '\t').replace(/\\"/g, '"')
     : rawText;
-  const text = normalizedRawText
+  
+  // First, try to extract JSON without removing HTML tags
+  const textWithoutHtmlCleanup = normalizedRawText
     .replace(/<br\s*[\/]?>/gi, '\n')
-    .replace(/<\/?[^>]+(>|$)/g, '')
     .replace(/&amp;/g, '&')
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
@@ -112,17 +113,40 @@ export function extractJsonFromResponse(rawText: string): string {
     .replace(/&gt;/g, '>')
     .trim();
 
-  const fencedBlocks = text.matchAll(/```(?:json|javascript|js)?\s*([\s\S]*?)```/gi);
+  const fencedBlocks = textWithoutHtmlCleanup.matchAll(/```(?:json|javascript|js)?\s*([\s\S]*?)```/gi);
   for (const match of fencedBlocks) {
     const candidate = match[1].trim();
     if (candidate.startsWith('{')) return candidate;
   }
 
-  const firstBrace = text.indexOf('{');
-  if (firstBrace === -1) throw new Error('No JSON object found in response');
+  const firstBrace = textWithoutHtmlCleanup.indexOf('{');
+  if (firstBrace === -1) {
+    // Fallback: try with HTML cleanup if no JSON found
+    const textWithCleanup = normalizedRawText
+      .replace(/<br\s*[\/]?>/gi, '\n')
+      .replace(/<\/?[^>]+(>|$)/g, '')
+      .replace(/&amp;/g, '&')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .trim();
 
-  const endIndex = findJsonObjectEnd(text, firstBrace);
-  return endIndex === -1 ? text.slice(firstBrace) : text.slice(firstBrace, endIndex);
+    const fallbackFencedBlocks = textWithCleanup.matchAll(/```(?:json|javascript|js)?\s*([\s\S]*?)```/gi);
+    for (const match of fallbackFencedBlocks) {
+      const candidate = match[1].trim();
+      if (candidate.startsWith('{')) return candidate;
+    }
+
+    const fallbackFirstBrace = textWithCleanup.indexOf('{');
+    if (fallbackFirstBrace === -1) throw new Error('No JSON object found in response');
+
+    const fallbackEndIndex = findJsonObjectEnd(textWithCleanup, fallbackFirstBrace);
+    return fallbackEndIndex === -1 ? textWithCleanup.slice(fallbackFirstBrace) : textWithCleanup.slice(fallbackFirstBrace, fallbackEndIndex);
+  }
+
+  const endIndex = findJsonObjectEnd(textWithoutHtmlCleanup, firstBrace);
+  return endIndex === -1 ? textWithoutHtmlCleanup.slice(firstBrace) : textWithoutHtmlCleanup.slice(firstBrace, endIndex);
 }
 
 export function completeNotePayload(payload: Partial<NoteRecord>): Partial<NoteRecord> {

@@ -14,9 +14,10 @@ type NoteCardProps = {
   onDelete: (note: NoteItem) => void;
 };
 
-const toImageSource = (imagePath: string) => (
-  imagePath.startsWith('local://') ? imagePath : `local://${encodeURI(imagePath.replace(/\\/g, '/'))}`
-);
+const toImageSource = (image: string | { filePath: string; pageNumber: number }) => {
+  const imagePath = typeof image === 'string' ? image : image.filePath;
+  return imagePath.startsWith('local://') ? imagePath : `local://${encodeURI(imagePath.replace(/\\/g, '/'))}`;
+};
 
 export function NoteCard({
   note,

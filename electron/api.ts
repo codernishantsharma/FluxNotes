@@ -54,11 +54,24 @@ function logResponse(transport: 'websocket' | 'http', response: unknown, metadat
     } catch {
       // Start a new response log when the file does not exist or is invalid.
     }
-    entries.push({ timestamp: new Date().toISOString(), transport, ...metadata, response: redactResponse(response) });
-    writeFileSync(responseLogPath, JSON.stringify(entries, null, 2), { encoding: 'utf8', mode: 0o600 });
+    const redactedResponse = redactResponse(response);
+    entries.push({ timestamp: new Date().toISOString(), transport, ...metadata, response: redactedResponse });
+    
+    // Check if the stringified response would be too large
+    const jsonString = JSON.stringify(entries, null, 2);
+    if (jsonString.length > 50 * 1024 * 1024) { // 50MB limit
+      console.warn('[API] Response log too large, skipping write');
+      return;
+    }
+    
+    writeFileSync(responseLogPath, jsonString, { encoding: 'utf8', mode: 0o600 });
     chmodSync(responseLogPath, 0o600);
   } catch (error) {
-    console.error('[API] Failed to write response log:', error);
+    if (error instanceof RangeError && error.message === 'Invalid string length') {
+      console.warn('[API] Response log too large to stringify, skipping write');
+    } else {
+      console.error('[API] Failed to write response log:', error);
+    }
   }
 }
 
@@ -70,13 +83,24 @@ function logRequest(transport: 'websocket' | 'http', request: unknown, metadata?
       const existing = JSON.parse(readFileSync(requestLogPath, 'utf8'));
       if (Array.isArray(existing)) entries = existing;
     } catch {
-      // Start a new request log when the file does not exist or is invalid.
+      // Start a new request log when the file does not exist or invalid.
     }
-    entries.push({ timestamp: new Date().toISOString(), transport, ...metadata, request: redactResponse(request) });
-    writeFileSync(requestLogPath, JSON.stringify(entries, null, 2), { encoding: 'utf8', mode: 0o600 });
+    const redactedRequest = redactResponse(request);
+    entries.push({ timestamp: new Date().toISOString(), transport, ...metadata, request: redactedRequest });
+    // Check if the stringified request would be too large
+    const jsonString = JSON.stringify(entries, null, 2);
+    if (jsonString.length > 50 * 1024 * 1024) { // 50MB limit
+      console.warn('[API] Request log too large, skipping write');
+      return;
+    }
+    writeFileSync(requestLogPath, jsonString, { encoding: 'utf8', mode: 0o600 });
     chmodSync(requestLogPath, 0o600);
   } catch (error) {
-    console.error('[API] Failed to write request log:', error);
+    if (error instanceof RangeError && error.message === 'Invalid string length') {
+      console.warn('[API] Request log too large to stringify, skipping write');
+    } else {
+      console.error('[API] Failed to write request log:', error);
+    }
   }
 }
 
