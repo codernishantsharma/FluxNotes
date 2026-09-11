@@ -1,7 +1,6 @@
 name: Android Build
 
 on:
-  # Manual start only
   workflow_dispatch:
 
 permissions:
@@ -37,11 +36,16 @@ jobs:
       - name: Build debug APK
         run: ./gradlew assembleDebug --stacktrace
 
+      - name: Verify APK
+        run: |
+          echo "Generated APK files:"
+          find app/build/outputs/apk -type f -name "*.apk" -print
+
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
           name: FluxNotes-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          path: android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14
 
@@ -50,7 +54,7 @@ jobs:
         with:
           name: FluxNotes-build-reports
           path: |
-            app/build/outputs/logs/**
-            app/build/outputs/mapping/**
+            android/app/build/outputs/logs/**
+            android/app/build/outputs/mapping/**
           if-no-files-found: ignore
           retention-days: 14
