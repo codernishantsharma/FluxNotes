@@ -1,18 +1,7 @@
 name: Android Build
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'android/**'
-      - '.github/workflows/android-build.yml'
-
-  pull_request:
-    paths:
-      - 'android/**'
-      - '.github/workflows/android-build.yml'
-
+  # Manual start only
   workflow_dispatch:
 
 permissions:
@@ -32,7 +21,7 @@ jobs:
         working-directory: android
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
@@ -52,7 +41,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: FluxNotes-debug-apk
-          path: android/app/build/outputs/apk/debug/*.apk
+          path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14
 
@@ -61,7 +50,7 @@ jobs:
         with:
           name: FluxNotes-build-reports
           path: |
-            android/app/build/outputs/logs/**
-            android/app/build/outputs/mapping/**
+            app/build/outputs/logs/**
+            app/build/outputs/mapping/**
           if-no-files-found: ignore
           retention-days: 14
