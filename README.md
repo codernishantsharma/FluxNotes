@@ -1,5 +1,7 @@
 # ⚡ Flux Notes
 
+<a href="https://www.producthunt.com/products/fluxnotes?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-fluxnotes" target="_blank" rel="noopener noreferrer"><img alt="FluxNotes - Turn any topic into beautiful handwritten notes | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1248645&amp;theme=light&amp;t=1789277188873"></a>
+
 ### Create beautiful notes and academic projects without designing every page yourself.
 
 Flux Notes helps you turn your content into **clean, beautifully
