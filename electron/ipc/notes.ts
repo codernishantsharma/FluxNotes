@@ -2,6 +2,7 @@ import { ipcMain, dialog, BrowserWindow, nativeImage } from 'electron';
 import fs from 'fs';
 import path from 'path';
 import { NoteRecord, ExportNoteOptions, FailedPage } from '../types';
+import { generateNoteMarkdown } from '../utils/markdownGenerator';
 import {
   getStoredNotes,
   saveNotesCollection,
@@ -21,6 +22,7 @@ import {
 } from '../utils/helpers';
 import { CHATGPT_URL, GEMINI_SIGN_IN_URL } from '../windows';
 import { getLogs, clearLogs } from '../utils/logger';
+import { saveNoteToFn, deleteFnFile } from '../utils/fnStorage';
 
 export function registerNotesIpcHandlers(
   getMainWindow: () => BrowserWindow | null,
@@ -123,6 +125,13 @@ export function registerNotesIpcHandlers(
     }
 
     await saveNotesCollection(notes);
+
+    try {
+      await saveNoteToFn(fullNoteRecord);
+    } catch (fnErr) {
+      console.warn('[save-note] Failed to write .fn binary file:', fnErr);
+    }
+
     return true;
   });
 
@@ -177,6 +186,13 @@ export function registerNotesIpcHandlers(
     const removedPaths = new Set(removableImagePaths);
     const records = await getStoredRecords();
     await saveImageRecords(records.filter((record) => !removedPaths.has(record.filePath)));
+
+    try {
+      await deleteFnFile(topicId);
+    } catch (fnErr) {
+      console.warn('[delete-note] Failed to delete .fn binary file:', fnErr);
+    }
+
     return { success: true };
   });
 
@@ -224,6 +240,26 @@ export function registerNotesIpcHandlers(
       } finally {
         if (!printWindow.isDestroyed()) printWindow.destroy();
       }
+    }
+
+    if (format === 'md') {
+      if (!mainWindow) return { success: false, error: 'Main window unavailable.' };
+      const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+        title: 'Export notes as Markdown',
+        defaultPath: `${fileName}.md`,
+        filters: [{ name: 'Markdown document', extensions: ['md'] }],
+      });
+      if (canceled || !filePath) return { success: false, canceled: true };
+
+      const notes = await getStoredNotes();
+      const currentNote = notes.find((n) => safeFileName(n.topicName) === fileName || n.topicName === topicName) || {
+        topicName,
+        images: imagePaths.map((p, idx) => ({ filePath: p, pageNumber: idx + 1 })),
+      };
+
+      const markdownText = generateNoteMarkdown(currentNote);
+      await fs.promises.writeFile(filePath, markdownText, 'utf-8');
+      return { success: true, path: filePath, count: 1 };
     }
 
     if (format === 'png' || format === 'jpeg') {

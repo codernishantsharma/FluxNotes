@@ -44,4 +44,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   syncSessionToServer: (serverUrl: string, password: string) => ipcRenderer.invoke('sync-session-to-server', serverUrl, password),
   getLogs: () => ipcRenderer.invoke('get-logs'),
   clearLogs: () => ipcRenderer.invoke('clear-logs'),
+  convertLocalImageToBase64: (filePath: string) => ipcRenderer.invoke('convert-local-image-to-base64', filePath),
+  fnInspector: {
+    list: () => ipcRenderer.invoke('fn-list'),
+    inspect: (topicUid: string) => ipcRenderer.invoke('fn-inspect', topicUid),
+    getPage: (topicUid: string, pageNumber: number) => ipcRenderer.invoke('fn-get-page', topicUid, pageNumber),
+    getChunks: (topicUid: string) => ipcRenderer.invoke('fn-get-chunks', topicUid),
+    getEmbedding: (topicUid: string, chunkId: string) => ipcRenderer.invoke('fn-get-embedding', topicUid, chunkId),
+    getRelationships: (topicUid: string) => ipcRenderer.invoke('fn-get-relationships', topicUid),
+    search: (query: string, options?: unknown) => ipcRenderer.invoke('fn-search', query, options),
+    validate: (topicUid: string) => ipcRenderer.invoke('fn-validate', topicUid),
+    getBinaryInfo: (topicUid: string) => ipcRenderer.invoke('fn-get-binary-info', topicUid),
+  },
 });

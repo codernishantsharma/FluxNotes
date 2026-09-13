@@ -12,6 +12,7 @@ const storage_1 = require("../utils/storage");
 const gemini_1 = require("./gemini");
 const chatgpt_1 = require("./chatgpt");
 const logger_1 = require("../utils/logger");
+const retrieval_1 = require("./retrieval");
 async function processAiPrompt(workerWindow, mainWindow, userText, provider, activeSessionId, activeSession, isGeminiSessionInitialized, attachments) {
     const sessionId = activeSessionId || (0, helpers_1.createChatSessionId)();
     let session = activeSession || { conversationId: null, parentMessageId: null };
@@ -21,6 +22,10 @@ async function processAiPrompt(workerWindow, mainWindow, userText, provider, act
         const promptPath = path_1.default.join(__dirname, '..', '..', 'prompt.md');
         if (fs_1.default.existsSync(promptPath)) {
             promptContent = fs_1.default.readFileSync(promptPath, 'utf-8');
+        }
+        const ragContext = await (0, retrieval_1.buildRagContext)(userText);
+        if (ragContext) {
+            promptContent = `${promptContent}\n\n${ragContext}`;
         }
     }
     catch (error) {
@@ -78,7 +83,7 @@ async function processAiPrompt(workerWindow, mainWindow, userText, provider, act
                     ? await (0, gemini_1.downloadGeminiImages)(geminiResult?.rawText || '')
                     : [];
                 result = {
-                    rawText: geminiResult?.rawText || '',
+                    rawText: String(geminiResult?.rawText || ''),
                     conversationId: null,
                     messageId: null,
                     session: null,
@@ -243,7 +248,7 @@ async function processAiPrompt(workerWindow, mainWindow, userText, provider, act
         const generatedAssetImages = window.__fluxnotesGeneratedAssetImages || [];
 
         return {
-          rawText: finalOutput.text || finalOutput,
+          rawText: String(finalOutput.text || finalOutput || ''),
           messageId: useMessageId,
           conversationId: activeConvoId,
           session: window.__fluxnotesChatGPT.getSession(sessionId),
@@ -557,7 +562,7 @@ async function processAiPrompt(workerWindow, mainWindow, userText, provider, act
             (0, logger_1.logError)({
                 category: 'parsing',
                 message: 'Failed to parse JSON response',
-                details: { error: err.message, stack: err.stack, rawText: rawText.substring(0, 500) },
+                details: { error: err.message, stack: err.stack, rawText: typeof rawText === 'string' ? rawText.substring(0, 500) : String(rawText).substring(0, 500) },
             });
             return {
                 resultPayload: { error: 'Failed to parse JSON', raw: rawText, messageId, conversationId, generationId, fileId, generatedImages },

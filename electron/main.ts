@@ -10,11 +10,15 @@ import {
 } from './windows';
 import { registerNotesIpcHandlers } from './ipc/notes';
 import { registerUpdaterHandlers } from './ipc/updater';
+import { registerFnInspectorIpcHandlers } from './ipc/fnInspector';
+import { ensureAllNotesSyncedToFn } from './utils/fnStorage';
 import { processAiPrompt } from './ai';
 import { AIProvider, ChatSession } from './types';
 import { getApiToken, startApiServer, stopApiServer } from './api';
 import { configureNgrok, getNgrokSettings, startNgrok, stopNgrok } from './ngrok';
 import { WebSocket } from 'ws';
+import { readFileSync } from 'fs';
+import { extname } from 'path';
 
 const sessionState: {
   pendingChatUrl: string | null;
@@ -40,6 +44,29 @@ ensureDirectoriesExist();
 
 ipcMain.handle('get-api-token', () => getApiToken());
 ipcMain.handle('get-ngrok-settings', () => getNgrokSettings());
+ipcMain.handle('convert-local-image-to-base64', async (_event, filePath: string) => {
+  try {
+    const fileBuffer = readFileSync(filePath);
+    const base64 = fileBuffer.toString('base64');
+    const ext = extname(filePath).toLowerCase();
+    let mimeType = 'image/png';
+    
+    if (ext === '.jpg' || ext === '.jpeg') {
+      mimeType = 'image/jpeg';
+    } else if (ext === '.gif') {
+      mimeType = 'image/gif';
+    } else if (ext === '.webp') {
+      mimeType = 'image/webp';
+    } else if (ext === '.svg') {
+      mimeType = 'image/svg+xml';
+    }
+    
+    return { success: true, base64, mimeType };
+  } catch (error) {
+    console.error('Error converting image to base64:', error);
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+});
 ipcMain.handle('configure-ngrok', async (_event, token: string, port: number, domain: string) => {
   try {
     await configureNgrok(token, port, domain);
@@ -186,9 +213,32 @@ app.whenReady().then(async () => {
     callback({ path: decodedPath });
   });
 
+  protocol.registerBufferProtocol('fnd', async (request, callback) => {
+    try {
+      const url = request.url.replace(/^fnd:\/\//, '');
+      const parts = url.split('/');
+      const topicId = parts[0];
+      const pageNumber = parseInt(parts[1] || '1', 10);
+
+      const { getFndImagePage } = await import('./utils/fndStorage');
+      const result = await getFndImagePage(topicId, pageNumber);
+      if (result) {
+        callback({ mimeType: result.mimeType, data: result.buffer });
+      } else {
+        callback({ statusCode: 404 });
+      }
+    } catch (err) {
+      console.error('[Protocol fnd://] Error serving fnd image:', err);
+      callback({ statusCode: 500 });
+    }
+  });
+
   registerWindowControlListeners();
   registerNotesIpcHandlers(getMainWindow, getWorkerWindow, getSelectedProvider, sessionState);
   registerUpdaterHandlers(getMainWindow);
+  registerFnInspectorIpcHandlers();
+
+  void ensureAllNotesSyncedToFn();
 
   createWindows(resetSessionState);
 });
